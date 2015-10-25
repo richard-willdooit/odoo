@@ -5,6 +5,7 @@ from openerp import api
 from openerp import SUPERUSER_ID
 from openerp.exceptions import AccessError
 from openerp.osv import osv, fields
+from openerp.sql_db import TestCursor
 from openerp.tools import config
 from openerp.tools.misc import find_in_path
 from openerp.tools.translate import _
@@ -140,8 +141,26 @@ class Report(osv.Model):
         if context is None:
             context = {}
 
+        # As the assets are generated during the same transaction as the rendering of the
+        # templates calling them, there is a scenario where the assets are unreachable: when
+        # you make a request to read the assets while the transaction creating them is not done.
+        # Indeed, when you make an asset request, the controller has to read the `ir.attachment`
+        # table.
+        # This scenario happens when you want to print a PDF report for the first time, as the
+        # assets are not in cache and must be generated. To workaround this issue, we manually
+        # commit the writes in the `ir.attachment` table. It is done thanks to a key in the context.
+        if not config['test_enable']:
+            context = dict(context, commit_assetsbundle=True)
+
         if html is None:
             html = self.get_html(cr, uid, ids, report_name, data=data, context=context)
+
+        # The test cursor prevents the use of another environnment while the current
+        # transaction is not finished, leading to a deadlock when the report requests
+        # an asset bundle during the execution of test scenarios. In this case, return
+        # the html version.
+        if isinstance(cr, TestCursor):
+            return html
 
         html = html.decode('utf-8')  # Ensure the current document is utf-8 encoded.
 
@@ -157,7 +176,6 @@ class Report(osv.Model):
             paperformat = report.paperformat_id
 
         # Preparing the minimal html pages
-        css = ''  # Will contain local css
         headerhtml = []
         contenthtml = []
         footerhtml = []
@@ -174,17 +192,14 @@ class Report(osv.Model):
             root = lxml.html.fromstring(html)
             match_klass = "//div[contains(concat(' ', normalize-space(@class), ' '), ' {} ')]"
 
-            for node in root.xpath("//html/head/style"):
-                css += node.text
-
             for node in root.xpath(match_klass.format('header')):
                 body = lxml.html.tostring(node)
-                header = render_minimal(dict(css=css, subst=True, body=body, base_url=base_url))
+                header = render_minimal(dict(subst=True, body=body, base_url=base_url))
                 headerhtml.append(header)
 
             for node in root.xpath(match_klass.format('footer')):
                 body = lxml.html.tostring(node)
-                footer = render_minimal(dict(css=css, subst=True, body=body, base_url=base_url))
+                footer = render_minimal(dict(subst=True, body=body, base_url=base_url))
                 footerhtml.append(footer)
 
             for node in root.xpath(match_klass.format('page')):
@@ -205,7 +220,7 @@ class Report(osv.Model):
 
                 # Extract the body
                 body = lxml.html.tostring(node)
-                reportcontent = render_minimal(dict(css=css, subst=False, body=body, base_url=base_url))
+                reportcontent = render_minimal(dict(subst=False, body=body, base_url=base_url))
 
                 contenthtml.append(tuple([reportid, reportcontent]))
 
@@ -224,7 +239,8 @@ class Report(osv.Model):
         # Run wkhtmltopdf process
         return self._run_wkhtmltopdf(
             cr, uid, headerhtml, footerhtml, contenthtml, context.get('landscape'),
-            paperformat, specific_paperformat_args, save_in_attachment
+            paperformat, specific_paperformat_args, save_in_attachment,
+            context.get('set_viewport_size')
         )
 
     @api.v8
@@ -316,7 +332,7 @@ class Report(osv.Model):
     def _check_wkhtmltopdf(self):
         return wkhtmltopdf_state
 
-    def _run_wkhtmltopdf(self, cr, uid, headers, footers, bodies, landscape, paperformat, spec_paperformat_args=None, save_in_attachment={}):
+    def _run_wkhtmltopdf(self, cr, uid, headers, footers, bodies, landscape, paperformat, spec_paperformat_args=None, save_in_attachment=None, set_viewport_size=False):
         """Execute wkhtmltopdf as a subprocess in order to convert html given in input into a pdf
         document.
 
@@ -329,9 +345,12 @@ class Report(osv.Model):
         :param save_in_attachment: dict of reports to save/load in/from the db
         :returns: Content of the pdf as a string
         """
+        if not save_in_attachment:
+            save_in_attachment = {}
+
         command_args = []
-        if wkhtmltopdf_state == "ok":
-            command_args.extend(['--viewport-size', '1024x768'])
+        if set_viewport_size:
+            command_args.extend(['--viewport-size', landscape and '1024x1280' or '1280x1024'])
 
         # Passing the cookie to wkhtmltopdf in order to resolve internal links.
         try:
@@ -354,7 +373,7 @@ class Report(osv.Model):
                     del command_args[index]
                     del command_args[index]
                     command_args.extend(['--orientation', 'landscape'])
-        elif landscape and not '--orientation' in command_args:
+        elif landscape and '--orientation' not in command_args:
             command_args.extend(['--orientation', 'landscape'])
 
         # Execute WKhtmltopdf
@@ -403,7 +422,7 @@ class Report(osv.Model):
 
                 if process.returncode not in [0, 1]:
                     raise UserError(_('Wkhtmltopdf failed (error code: %s). '
-                                        'Message: %s') % (str(process.returncode), err))
+                                      'Message: %s') % (str(process.returncode), err))
 
                 # Save the pdf in attachment if marked
                 if reporthtml[0] is not False and save_in_attachment.get(reporthtml[0]):
@@ -418,8 +437,7 @@ class Report(osv.Model):
                         try:
                             self.pool['ir.attachment'].create(cr, uid, attachment)
                         except AccessError:
-                            _logger.info("Cannot save PDF report %r as attachment",
-                                            attachment['name'])
+                            _logger.info("Cannot save PDF report %r as attachment", attachment['name'])
                         else:
                             _logger.info('The PDF document %s is now saved in the database',
                                          attachment['name'])

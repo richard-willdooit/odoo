@@ -25,7 +25,7 @@ var History = function History ($editable) {
 
     this.makeSnap = function (event, rng) {
         rng = rng || range.create();
-        var elEditable = $(rng.sc).closest('.o_editable')[0];
+        var elEditable = $(rng && rng.sc).closest('.o_editable')[0];
         if (!elEditable) {
             return false;
         }
@@ -144,7 +144,9 @@ var History = function History ($editable) {
     this.recordUndo = function ($editable, event, internal_history) {
         var self = this;
         if (!$editable) {
-            $editable = $(range.create().sc).closest(".o_editable");
+            var rng = range.create();
+            if(!rng) return;
+            $editable = $(rng.sc).closest(".o_editable");
         }
 
         if (aUndo[pos] && (event === "applySnap" || event === "activate")) {
@@ -316,16 +318,15 @@ var RTE = Widget.extend({
                 $node.addClass('o_is_inline_editable');
             }
 
-            // start element observation
-            $node.one('content_changed', function () {
-                $(this).addClass('o_dirty');
-            });
-
             $node.data('initInnerHTML', $node.html());
         });
 
-        $(document).on('content_changed', '.o_editable', function () {
+        // start element observation
+        $(document).on('content_changed', '.o_editable', function (event) {
             self.trigger('change', this);
+            if(!$(this).hasClass('o_dirty')) {
+                $(this).addClass('o_dirty');
+            }
         });
 
         $('#wrapwrap, .o_editable').on('click', '*', this, this.onClick);
@@ -426,15 +427,25 @@ var RTE = Widget.extend({
             if (this.__saved[key]) return true;
             this.__saved[key] = true;
         }
+        // escape text nodes for xml saving
+        var escaped_el = $el.clone();
+        var to_escape = escaped_el.find('*').addBack();
+        to_escape = to_escape.not(to_escape.filter('object,iframe,script,style,[data-oe-model][data-oe-model!="ir.ui.view"]').find('*').addBack());
+        to_escape.contents().each(function(){
+            if(this.nodeType == 3) {
+                this.nodeValue = $('<div />').text(this.nodeValue).html();
+            }
+        });
+        var markup = escaped_el.prop('outerHTML');
 
         return ajax.jsonRpc('/web/dataset/call', 'call', {
             model: 'ir.ui.view',
             method: 'save',
             args: [
                 $el.data('oe-id'),
-                $el.prop('outerHTML'),
+                markup,
                 $el.data('oe-xpath') || null,
-                context || base.get_context()
+                _.omit(context || base.get_context(), 'lang')
             ],
         });
     },

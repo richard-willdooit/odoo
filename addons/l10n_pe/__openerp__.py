@@ -4,7 +4,7 @@
 # Copyright (c) 2011 Cubic ERP - Teradata SAC. (http://cubicerp.com).
 
 {
-    'name': 'Peru Localization Chart Account',
+    'name': 'Peru - Accounting',
     'version': '1.0',
     'description': """
 Peruvian accounting chart and tax localization. According the PCGE 2010.
@@ -17,13 +17,13 @@ SUNAT 2011 (PCGE 2010).
     'author': ['Cubic ERP'],
     'website': 'http://cubicERP.com',
     'category': 'Localization/Account Charts',
-    'depends': [],
+    'depends': ['account'],
     'data':[
         'l10n_pe_chart.xml',
         'account_tax.xml',
-        'l10n_pe_wizard.xml',
+        'account_chart_template.yml',
     ],
     'demo': [],
     'active': False,
-    'installable': False,
+    'installable': True,
 }

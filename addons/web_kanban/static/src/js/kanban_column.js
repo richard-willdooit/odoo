@@ -24,6 +24,8 @@ var KanbanColumn = Widget.extend({
         },
         'click .o_column_edit': 'edit_column',
         'click .o_column_delete': 'delete_column',
+        'click .o_column_archive': 'archive_records',
+        'click .o_column_unarchive': 'unarchive_records',
         'click .o_kanban_quick_add': 'add_quick_create',
         'click .o_kanban_load_more': 'load_more',
     },
@@ -49,6 +51,7 @@ var KanbanColumn = Widget.extend({
         this.grouped_by_m2o = options.grouped_by_m2o;
         this.editable = options.editable;
         this.deletable = options.deletable;
+        this.has_active_field = options.has_active_field;
         this.records_editable = options.records_editable;
         this.records_deletable = options.records_deletable;
         this.relation = options.relation;
@@ -175,6 +178,16 @@ var KanbanColumn = Widget.extend({
         }
     },
 
+    archive_records: function(event) {
+        event.preventDefault();
+        this.trigger_up('kanban_column_archive_records', {archive: true});
+    },
+
+    unarchive_records: function(event) {
+        event.preventDefault();
+        this.trigger_up('kanban_column_archive_records', {archive: false});
+    },
+
     delete_column: function (event) {
         event.preventDefault();
         var buttons = [
@@ -227,12 +240,10 @@ var KanbanColumn = Widget.extend({
         this.quick_create_widget = new RecordQuickCreate(this, width);
         this.quick_create_widget.insertAfter(this.$header);
         this.quick_create_widget.$el.focusout(function () {
-            setTimeout(function() {
-                var hasFocus = !! (self.quick_create_widget.$(':focus').length > 0);
-                if (! hasFocus && self.quick_create_widget) {
-                    self.cancel_quick_create();
-                }
-            }, 10);
+            var hasFocus = (self.quick_create_widget.$(':focus').length > 0);
+            if (! hasFocus && self.quick_create_widget) {
+                self.cancel_quick_create();
+            }
         });
 
     },

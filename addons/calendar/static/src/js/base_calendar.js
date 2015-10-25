@@ -22,7 +22,7 @@ function reload_favorite_list(result) {
     if (result.view) {
         self = result.view;
     }
-    new Model("res.users")
+    return new Model("res.users")
     .query(["partner_id"])
     .filter([["id", "=", self.dataset.context.uid]])
     .first()
@@ -78,18 +78,33 @@ function reload_favorite_list(result) {
 
 CalendarView.include({
     extraSideBar: function() {
-        this._super();
+        var result = this._super();
         if (this.useContacts) {
-            reload_favorite_list(this);
+            return result.then(reload_favorite_list(this));
         }
+        return result;
     }
 });
 
 widgets.SidebarFilter.include({
+    events_loaded: function() {
+        this._super.apply(this, arguments);
+        this.reinitialize_m2o();
+    },
     add_favorite_calendar: function() {
-        var self = this;
         if (this.dfm)
             return;
+        this.initialize_m2o();
+    },
+    reinitialize_m2o: function() {
+        if (this.dfm) {
+            this.dfm.destroy();
+            this.dfm = undefined;
+        }
+        this.initialize_m2o();
+    },
+    initialize_m2o: function() {
+        var self = this;
         this.dfm = new form_common.DefaultFieldManager(self);
         this.dfm.extend_field_desc({
             partner_id: {
@@ -113,7 +128,8 @@ widgets.SidebarFilter.include({
     },
     add_filter: function() {
         var self = this;
-        new Model("res.users")
+        var defs = [];
+        defs.push(new Model("res.users")
         .query(["partner_id"])
         .filter([["id", "=",this.view.dataset.context.uid]])
         .first()
@@ -121,11 +137,13 @@ widgets.SidebarFilter.include({
             $.map(self.ir_model_m2o.display_value, function(element,index) {
                 if (result.partner_id[0] != index){
                     self.ds_message = new data.DataSetSearch(self, 'calendar.contacts');
-                    self.ds_message.call("create", [{'partner_id': index}]);
+                    defs.push(self.ds_message.call("create", [{'partner_id': index}]));
                 }
             });
+        }));
+        return $.when.apply(null, defs).then(function() {
+            return reload_favorite_list(self);
         });
-        reload_favorite_list(this);
     },
     destroy_filter: function(e) {
         var self = this;
@@ -148,31 +166,32 @@ widgets.SidebarFilter.include({
 
 var CalendarNotification = Notification.extend({
     template: "CalendarNotification",
-    events: {
-        'click .link2event': function() {
-            var self = this;
-
-            this.rpc("/web/action/load", {
-                action_id: "calendar.action_calendar_event_notify",
-            }).then(function(r) {
-                r.res_id = self.eid;
-                return self.do_action(r);
-            });
-        },
-
-        'click .link2recall': function() {
-            this.destroy(true);
-        },
-
-        'click .link2showed': function() {
-            this.destroy(true);
-            this.rpc("/calendar/notify_ack");
-        },
-    },
 
     init: function(parent, title, text, eid) {
         this._super(parent, title, text, true);
         this.eid = eid;
+
+        this.events = _.extend(this.events || {}, {
+            'click .link2event': function() {
+                var self = this;
+
+                this.rpc("/web/action/load", {
+                    action_id: "calendar.action_calendar_event_notify",
+                }).then(function(r) {
+                    r.res_id = self.eid;
+                    return self.do_action(r);
+                });
+            },
+
+            'click .link2recall': function() {
+                this.destroy(true);
+            },
+
+            'click .link2showed': function() {
+                this.destroy(true);
+                this.rpc("/calendar/notify_ack");
+            },
+        });
     },
 });
 
@@ -222,7 +241,14 @@ var Many2ManyAttendee = FieldMany2ManyTags.extend({
     tag_template: "Many2ManyAttendeeTag",
     get_render_data: function(ids){
         var dataset = new data.DataSetStatic(this, this.field.relation, this.build_context());
-        return dataset.call('get_attendee_detail',[ids, this.getParent().datarecord.id || false]);
+        return dataset.call('get_attendee_detail',[ids, this.getParent().datarecord.id || false])
+                      .then(process_data);
+
+        function process_data(data) {
+            return _.map(data, function(d) {
+                return _.object(['id', 'name', 'status'], d);
+            });
+        }
     }
 });
 

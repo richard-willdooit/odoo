@@ -55,7 +55,7 @@ class AccountMove(models.Model):
                     for partial_line in (line.matched_debit_ids + line.matched_credit_ids):
                         total_reconciled += partial_line.amount
             if total_amount == 0.0:
-                move.matched_percentage = 100.0
+                move.matched_percentage = 1.0
             else:
                 move.matched_percentage = total_reconciled / total_amount
 
@@ -91,6 +91,8 @@ class AccountMove(models.Model):
         default=lambda self: self.env.user.company_id)
     matched_percentage = fields.Float('Percentage Matched', compute='_compute_matched_percentage', digits=0, store=True, readonly=True, help="Technical field used in cash basis method")
     statement_line_id = fields.Many2one('account.bank.statement.line', string='Bank statement line reconciled with this entry', copy=False, readonly=True)
+    # Dummy Account field to search on account.move by account_id
+    dummy_account_id = fields.Many2one('account.account', related='line_ids.account_id', string='Account', store=False)
 
     @api.model
     def create(self, vals):
@@ -118,7 +120,7 @@ class AccountMove(models.Model):
                 new_name = False
                 journal = move.journal_id
 
-                if invoice and invoice.move_name:
+                if invoice and invoice.move_name and invoice.move_name != '/':
                     new_name = invoice.move_name
                 else:
                     if journal.sequence_id:
@@ -224,6 +226,11 @@ class AccountMoveLine(models.Model):
             for unreconciled lines, and something in-between for partially reconciled lines.
         """
         for line in self:
+            if not line.account_id.reconcile:
+                line.reconciled = False
+                line.amount_residual = 0
+                line.amount_residual_currency = 0
+                continue
             #amounts in the partial reconcile table aren't signed, so we need to use abs()
             amount = abs(line.debit - line.credit)
             amount_residual_currency = abs(line.amount_currency) or 0.0
@@ -809,6 +816,7 @@ class AccountMoveLine(models.Model):
             amount = sum([r.amount_residual for r in self])
             vals['credit'] = amount > 0 and amount or 0.0
             vals['debit'] = amount < 0 and abs(amount) or 0.0
+        vals['partner_id'] = self.env['res.partner']._find_accounting_partner(self[0].partner_id).id
         company_currency = self[0].account_id.company_id.currency_id
         account_currency = self[0].account_id.currency_id or company_currency
         if 'amount_currency' not in vals and account_currency != company_currency:
@@ -818,7 +826,6 @@ class AccountMoveLine(models.Model):
         # Writeoff line in the account of self
         first_line_dict = vals.copy()
         first_line_dict['account_id'] = self[0].account_id.id
-        first_line_dict['partner_id'] = self[0].partner_id.id
         if 'analytic_account_id' in vals:
             del vals['analytic_account_id']
 
@@ -1064,8 +1071,6 @@ class AccountMoveLine(models.Model):
         """
         for obj_line in self:
             if obj_line.analytic_account_id:
-                if not obj_line.journal_id.analytic_journal_id:
-                    raise UserError(_("You have to define an analytic journal on the '%s' journal!") % (obj_line.journal_id.name, ))
                 if obj_line.analytic_line_ids:
                     obj_line.analytic_line_ids.unlink()
                 vals_line = obj_line._prepare_analytic_line()[0]
@@ -1085,7 +1090,6 @@ class AccountMoveLine(models.Model):
             'product_uom_id': self.product_uom_id and self.product_uom_id.id or False,
             'amount': (self.credit or 0.0) - (self.debit or 0.0),
             'general_account_id': self.account_id.id,
-            'journal_id': self.journal_id.analytic_journal_id.id,
             'ref': self.ref,
             'move_id': self.id,
             'user_id': self.invoice_id.user_id.id or self._uid,
@@ -1104,6 +1108,8 @@ class AccountMoveLine(models.Model):
         if context.get('date_from'):
             if not context.get('strict_range'):
                 domain += ['|', (date_field, '>=', context['date_from']), ('account_id.user_type_id.include_initial_balance', '=', True)]
+            elif context.get('initial_bal'):
+                domain += [(date_field, '<', context['date_from'])]
             else:
                 domain += [(date_field, '>=', context['date_from'])]
 
@@ -1133,8 +1139,8 @@ class AccountPartialReconcile(models.Model):
     _name = "account.partial.reconcile"
     _description = "Partial Reconcile"
 
-    debit_move_id = fields.Many2one('account.move.line')
-    credit_move_id = fields.Many2one('account.move.line')
+    debit_move_id = fields.Many2one('account.move.line', index=True)
+    credit_move_id = fields.Many2one('account.move.line', index=True)
     amount = fields.Monetary(currency_field='company_currency_id', help="Amount concerned by this matching. Assumed to be always positive")
     amount_currency = fields.Monetary(string="Amount in Currency")
     currency_id = fields.Many2one('res.currency', string='Currency')

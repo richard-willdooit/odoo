@@ -14,6 +14,7 @@ from openerp import SUPERUSER_ID, models
 from openerp import tools
 import openerp.exceptions
 from openerp.osv import fields, osv, expression
+from openerp.service.db import check_super
 from openerp.tools.translate import _
 from openerp.http import request
 from openerp.exceptions import UserError
@@ -35,7 +36,7 @@ class res_groups(osv.osv):
 
     def _get_full_name(self, cr, uid, ids, field, arg, context=None):
         res = {}
-        for g in self.browse(cr, uid, ids, context):
+        for g in self.browse(cr, SUPERUSER_ID, ids, context=context):
             if g.category_id:
                 res[g.id] = '%s / %s' % (g.category_id.name, g.name)
             else:
@@ -84,6 +85,7 @@ class res_groups(osv.osv):
         'view_access': fields.many2many('ir.ui.view', 'ir_ui_view_group_rel', 'group_id', 'view_id', 'Views'),
         'comment' : fields.text('Comment', size=250, translate=True),
         'category_id': fields.many2one('ir.module.category', 'Application', select=True),
+        'color': fields.integer('Color Index'),
         'full_name': fields.function(_get_full_name, type='char', string='Group Name', fnct_search=_search_group),
         'share': fields.boolean('Share Group',
                     help="Group created to set access rights for sharing data with some users.")
@@ -117,6 +119,12 @@ class res_groups(osv.osv):
         self.pool['res.users'].has_group.clear_cache(self.pool['res.users'])
         return res
 
+class ResUsersLog(osv.Model):
+    _name = 'res.users.log'
+    _order = 'id desc'
+    # Currenly only uses the magical fields: create_uid, create_date,
+    # for recording logins. To be extended for other uses (chat presence, etc.)
+
 class res_users(osv.osv):
     """ User class. A res.users record models an OpenERP user and is different
         from an employee.
@@ -125,13 +133,13 @@ class res_users(osv.osv):
         used to store the data related to the partner: lang, name, address,
         avatar, ... The user model is now dedicated to technical data.
     """
-    __admin_ids = {}
-    _uid_cache = {}
+    __uid_cache = {}
     _inherits = {
         'res.partner': 'partner_id',
     }
     _name = "res.users"
     _description = 'Users'
+    _order = 'name, login'
 
     def _set_new_password(self, cr, uid, id, name, value, args, context=None):
         if value is False:
@@ -154,6 +162,12 @@ class res_users(osv.osv):
             res[user.id] = not self.has_group(cr, user.id, 'base.group_user')
         return res
 
+    def _store_trigger_share_res_groups(self, cr, uid, ids, context=None):
+        group_user = self.pool['ir.model.data'].xmlid_to_object(cr, SUPERUSER_ID, 'base.group_user', context=context)
+        if group_user and group_user.id in ids:
+            return group_user.users.ids
+        return []
+
     def _get_users_from_group(self, cr, uid, ids, context=None):
         result = set()
         groups = self.pool['res.groups'].browse(cr, uid, ids, context=context)
@@ -165,7 +179,6 @@ class res_users(osv.osv):
 
     _columns = {
         'id': fields.integer('ID'),
-        'login_date': fields.datetime('Latest connection', select=1, copy=False),
         'partner_id': fields.many2one('res.partner', required=True,
             string='Related Partner', ondelete='restrict',
             help='Partner-related data of the user', auto_join=True),
@@ -190,8 +203,8 @@ class res_users(osv.osv):
         'company_ids':fields.many2many('res.company','res_company_users_rel','user_id','cid','Companies'),
         'share': fields.function(_is_share, string='Share User', type='boolean',
              store={
-                 'res.users': (lambda self, cr, uid, ids, c={}: ids, None, 50),
-                 'res.groups': (_get_users_from_group, None, 50),
+                 'res.users': (lambda self, cr, uid, ids, c={}: ids, ['groups_id'], 50),
+                 'res.groups': (_store_trigger_share_res_groups, ['users'], 50),
              }, help="External user with limited access, created only for the purpose of sharing data."),
     }
 
@@ -199,6 +212,8 @@ class res_users(osv.osv):
     # access to the user but not its corresponding partner
     name = openerp.fields.Char(related='partner_id.name', inherited=True)
     email = openerp.fields.Char(related='partner_id.email', inherited=True)
+    log_ids = openerp.fields.One2many('res.users.log', 'create_uid', string='User log entries')
+    login_date = openerp.fields.Datetime(related='log_ids.create_date', string='Latest connection')
 
     def on_change_login(self, cr, uid, ids, login, context=None):
         if login and tools.single_email_re.match(login):
@@ -209,21 +224,13 @@ class res_users(osv.osv):
         partner_ids = [user.partner_id.id for user in self.browse(cr, uid, ids, context=context)]
         return self.pool.get('res.partner').onchange_state(cr, uid, partner_ids, state_id, context=context)
 
-    def onchange_type(self, cr, uid, ids, is_company, context=None):
-        """ Wrapper on the user.partner onchange_type, because some calls to the
-            partner form view applied to the user may trigger the
-            partner.onchange_type method, but applied to the user object.
-        """
-        partner_ids = [user.partner_id.id for user in self.browse(cr, uid, ids, context=context)]
-        return self.pool['res.partner'].onchange_type(cr, uid, partner_ids, is_company, context=context)
-
-    def onchange_address(self, cr, uid, ids, use_parent_address, parent_id, context=None):
+    def onchange_parent_id(self, cr, uid, ids, parent_id, context=None):
         """ Wrapper on the user.partner onchange_address, because some calls to the
             partner form view applied to the user may trigger the
             partner.onchange_type method, but applied to the user object.
         """
         partner_ids = [user.partner_id.id for user in self.browse(cr, uid, ids, context=context)]
-        return self.pool['res.partner'].onchange_address(cr, uid, partner_ids, use_parent_address, parent_id, context=context)
+        return self.pool['res.partner'].onchange_address(cr, uid, partner_ids, parent_id, context=context)
 
     def _check_company(self, cr, uid, ids, context=None):
         return all(((this.company_id in this.company_ids) or not this.company_ids) for this in self.browse(cr, uid, ids, context))
@@ -267,9 +274,6 @@ class res_users(osv.osv):
             pass
         return result
 
-    def _get_default_image(self, cr, uid, context=None):
-        return self.pool['res.partner']._get_default_image(cr, uid, False, colorize=True, context=context)
-
     _defaults = {
         'password': '',
         'active': True,
@@ -277,7 +281,6 @@ class res_users(osv.osv):
         'company_id': _get_company,
         'company_ids': _get_companies,
         'groups_id': _get_group,
-        'image': _get_default_image,
     }
 
     # User can write on a few of his own fields (but not his groups for example)
@@ -310,6 +313,24 @@ class res_users(osv.osv):
                 result = map(override_password, result)
 
         return result
+
+    def read_group(self, cr, uid, domain, fields, groupby, offset=0, limit=None, context=None, orderby=False, lazy=True):
+        if uid != SUPERUSER_ID:
+            groupby_fields = set([groupby] if isinstance(groupby, basestring) else groupby)
+            if groupby_fields.intersection(USER_PRIVATE_FIELDS):
+                raise openerp.exceptions.AccessError('Invalid groupby')
+        return super(res_users, self).read_group(
+            cr, uid, domain, fields, groupby, offset=offset, limit=limit, context=context, orderby=orderby, lazy=lazy)
+
+    def _search(self, cr, user, args, offset=0, limit=None, order=None, context=None, count=False, access_rights_uid=None):
+        if user != SUPERUSER_ID and args:
+            domain_terms = [term for term in args if isinstance(term, (tuple, list))]
+            domain_fields = set(left for (left, op, right) in domain_terms)
+            if domain_fields.intersection(USER_PRIVATE_FIELDS):
+                raise openerp.exceptions.AccessError('Invalid search criterion')
+        return super(res_users, self)._search(
+            cr, user, args, offset=offset, limit=limit, order=order, context=context, count=count,
+            access_rights_uid=access_rights_uid)
 
     def create(self, cr, uid, vals, context=None):
         user_id = super(res_users, self).create(cr, uid, vals, context=context)
@@ -353,10 +374,10 @@ class res_users(osv.osv):
         clear = partial(self.pool['ir.rule'].clear_cache, cr)
         map(clear, ids)
         db = cr.dbname
-        if db in self._uid_cache:
+        if db in self.__uid_cache:
             for id in ids:
-                if id in self._uid_cache[db]:
-                    del self._uid_cache[db][id]
+                if id in self.__uid_cache[db]:
+                    del self.__uid_cache[db][id]
         self.context_get.clear_cache(self)
         self.has_group.clear_cache(self)
         return res
@@ -365,10 +386,10 @@ class res_users(osv.osv):
         if 1 in ids:
             raise UserError(_('You can not remove the admin user as it is used internally for resources created by Odoo (updates, module installation, ...)'))
         db = cr.dbname
-        if db in self._uid_cache:
+        if db in self.__uid_cache:
             for id in ids:
-                if id in self._uid_cache[db]:
-                    del self._uid_cache[db][id]
+                if id in self.__uid_cache[db]:
+                    del self.__uid_cache[db][id]
         return super(res_users, self).unlink(cr, uid, ids, context=context)
 
     def name_search(self, cr, user, name='', args=None, operator='ilike', context=None, limit=100):
@@ -416,10 +437,7 @@ class res_users(osv.osv):
         return dataobj.browse(cr, uid, data_id, context=context).res_id
 
     def check_super(self, passwd):
-        if passwd == tools.config['admin_passwd']:
-            return True
-        else:
-            raise openerp.exceptions.AccessDenied()
+        return check_super(passwd)
 
     def check_credentials(self, cr, uid, password):
         """ Override this method to plug additional authentication methods"""
@@ -427,46 +445,25 @@ class res_users(osv.osv):
         if not res:
             raise openerp.exceptions.AccessDenied()
 
+    def _update_last_login(self, cr, uid):
+        # only create new records to avoid any side-effect on concurrent transactions
+        # extra records will be deleted by the periodical garbage collection
+        self.pool['res.users.log'].create(cr, uid, {}) # populated by defaults
+
     def _login(self, db, login, password):
         if not password:
             return False
         user_id = False
-        cr = self.pool.cursor()
         try:
-            # autocommit: our single update request will be performed atomically.
-            # (In this way, there is no opportunity to have two transactions
-            # interleaving their cr.execute()..cr.commit() calls and have one
-            # of them rolled back due to a concurrent access.)
-            cr.autocommit(True)
-            # check if user exists
-            res = self.search(cr, SUPERUSER_ID, [('login','=',login)])
-            if res:
-                user_id = res[0]
-                # check credentials
-                self.check_credentials(cr, user_id, password)
-                # We effectively unconditionally write the res_users line.
-                # Even w/ autocommit there's a chance the user row will be locked,
-                # in which case we can't delay the login just for the purpose of
-                # update the last login date - hence we use FOR UPDATE NOWAIT to
-                # try to get the lock - fail-fast
-                # Failing to acquire the lock on the res_users row probably means
-                # another request is holding it. No big deal, we don't want to
-                # prevent/delay login in that case. It will also have been logged
-                # as a SQL error, if anyone cares.
-                try:
-                    # NO KEY introduced in PostgreSQL 9.3 http://www.postgresql.org/docs/9.3/static/release-9-3.html#AEN115299
-                    update_clause = 'NO KEY UPDATE' if cr._cnx.server_version >= 90300 else 'UPDATE'
-                    cr.execute("SELECT id FROM res_users WHERE id=%%s FOR %s NOWAIT" % update_clause, (user_id,), log_exceptions=False)
-                    cr.execute("UPDATE res_users SET login_date = now() AT TIME ZONE 'UTC' WHERE id=%s", (user_id,))
-                    self.invalidate_cache(cr, user_id, ['login_date'], [user_id])
-                except Exception:
-                    _logger.debug("Failed to update last_login for db:%s login:%s", db, login, exc_info=True)
+            with self.pool.cursor() as cr:
+                res = self.search(cr, SUPERUSER_ID, [('login','=',login)])
+                if res:
+                    user_id = res[0]
+                    self.check_credentials(cr, user_id, password)
+                    self._update_last_login(cr, user_id)
         except openerp.exceptions.AccessDenied:
             _logger.info("Login failed for db:%s login:%s", db, login)
             user_id = False
-        finally:
-            cr.close()
-
         return user_id
 
     def authenticate(self, db, login, password, user_agent_env):
@@ -504,15 +501,12 @@ class res_users(osv.osv):
         if not passwd:
             # empty passwords disallowed for obvious security reasons
             raise openerp.exceptions.AccessDenied()
-        if self._uid_cache.get(db, {}).get(uid) == passwd:
+        if self.__uid_cache.setdefault(db, {}).get(uid) == passwd:
             return
         cr = self.pool.cursor()
         try:
             self.check_credentials(cr, uid, passwd)
-            if self._uid_cache.has_key(db):
-                self._uid_cache[db][uid] = passwd
-            else:
-                self._uid_cache[db] = {uid:passwd}
+            self.__uid_cache[db][uid] = passwd
         finally:
             cr.close()
 
@@ -559,6 +553,10 @@ class res_users(osv.osv):
                         (SELECT res_id FROM ir_model_data WHERE module=%s AND name=%s)""",
                    (uid, module, ext_id))
         return bool(cr.fetchone())
+
+    @api.multi
+    def _is_admin(self):
+        return self.id == openerp.SUPERUSER_ID or self.sudo(self).has_group('base.group_erp_manager')
 
     def get_company_currency_id(self, cr, uid, context=None):
         return self.browse(cr, uid, uid, context=context).company_id.currency_id.id
@@ -757,17 +755,18 @@ class groups_view(osv.osv):
         # and introduces the reified group fields
         # we have to try-catch this, because at first init the view does not exist
         # but we are already creating some basic groups
-        if not context or context.get('install_mode'):
+        user_context = dict(context or {})
+        if user_context.get('install_mode'):
             # use installation/admin language for translatable names in the view
-            context = dict(context or {})
-            context.update(self.pool['res.users'].context_get(cr, uid))
-        view = self.pool['ir.model.data'].xmlid_to_object(cr, SUPERUSER_ID, 'base.user_groups_view', context=context)
+            user_context.update(self.pool['res.users'].context_get(cr, uid))
+        view = self.pool['ir.model.data'].xmlid_to_object(cr, SUPERUSER_ID, 'base.user_groups_view', context=user_context)
         if view and view.exists() and view._name == 'ir.ui.view':
+            group_no_one = view.env.ref('base.group_no_one')
             xml1, xml2 = [], []
             xml1.append(E.separator(string=_('Application'), colspan="2"))
-            for app, kind, gs in self.get_groups_by_application(cr, uid, context):
+            for app, kind, gs in self.get_groups_by_application(cr, uid, user_context):
                 # hide groups in category 'Hidden' (except to group_no_one)
-                attrs = {'groups': 'base.group_no_one'} if app and app.xml_id == 'base.module_category_hidden' else {}
+                attrs = {'groups': 'base.group_no_one'} if app and (app.xml_id == 'base.module_category_hidden' or app.xml_id == 'base.module_category_extra') else {}
                 if kind == 'selection':
                     # application name with a selection field
                     field_name = name_selection_groups(map(int, gs))
@@ -779,13 +778,17 @@ class groups_view(osv.osv):
                     xml2.append(E.separator(string=app_name, colspan="4", **attrs))
                     for g in gs:
                         field_name = name_boolean_group(g.id)
-                        xml2.append(E.field(name=field_name, **attrs))
+                        if g == group_no_one:
+                            # make the group_no_one invisible in the form view
+                            xml2.append(E.field(name=field_name, invisible="1", **attrs))
+                        else:
+                            xml2.append(E.field(name=field_name, **attrs))
 
             xml2.append({'class': "o_label_nowrap"})
             xml = E.field(E.group(*(xml1), col="2"), E.group(*(xml2), col="4"), name="groups_id", position="replace")
             xml.addprevious(etree.Comment("GENERATED AUTOMATICALLY BY GROUPS"))
             xml_content = etree.tostring(xml, pretty_print=True, xml_declaration=True, encoding="utf-8")
-            view.write({'arch': xml_content})
+            view.with_context(context, lang=None).write({'arch': xml_content})
         return True
 
     def get_application_groups(self, cr, uid, domain=None, context=None):
@@ -925,7 +928,7 @@ class users_view(osv.osv):
     def fields_get(self, cr, uid, allfields=None, context=None, write_access=True, attributes=None):
         res = super(users_view, self).fields_get(cr, uid, allfields, context, write_access, attributes)
         # add reified groups fields
-        if uid != SUPERUSER_ID and not self.pool['res.users'].has_group(cr, uid, 'base.group_erp_manager'):
+        if not self.pool['res.users']._is_admin(cr, uid, [uid]):
             return res
         for app, kind, gs in self.pool['res.groups'].get_groups_by_application(cr, uid, context):
             if kind == 'selection':

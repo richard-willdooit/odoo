@@ -2,11 +2,14 @@ odoo.define('web.planner.common', function (require) {
 "use strict";
 
 var core = require('web.core');
+var Dialog = require('web.Dialog');
 var Model = require('web.Model');
 var Widget = require('web.Widget');
 var utils = require('web.utils');
 
 var QWeb = core.qweb;
+
+var _t = core._t;
 
 var Page = core.Class.extend({
     init: function (dom, page_index) {
@@ -46,6 +49,7 @@ var PlannerDialog = Widget.extend({
         'click li a[href^="#"]:not([data-toggle="collapse"])': 'change_page',
         'click button.mark_as_done': 'click_on_done',
         'click a.btn-next': 'change_to_next_page',
+        'click .o_planner_close_block span': 'close_modal',
     },
     init: function(parent, planner) {
         this._super(parent);
@@ -70,8 +74,6 @@ var PlannerDialog = Widget.extend({
     start: function() {
         var self = this;
         return this._super.apply(this, arguments).then(function() {
-            self.do_hide();
-
             self.$el.on('keyup', "textarea", function() {
                 if (this.scrollHeight != this.clientHeight) {
                     this.style.height = this.scrollHeight + "px";
@@ -89,8 +91,7 @@ var PlannerDialog = Widget.extend({
             self.pages.forEach(function(page) {
                 page.menu_item = self._find_menu_item_by_page_id(page.id);
             });
-
-            self.$el.append(self.$res);
+            self.$el.find('.o_planner_content_wrapper').append(self.$res);
 
             // update the planner_data with the new inputs of the view
             var actual_vals = self._get_values();
@@ -115,13 +116,16 @@ var PlannerDialog = Widget.extend({
         this.set('progress', this.planner.progress); // set progress to trigger initial UI update
     },
     _render_done_page: function (page) {
-        var mark_as_done_button = this.$('.mark_as_done');
+        var mark_as_done_button = this.$('.mark_as_done')
+        var mark_as_done_li = mark_as_done_button.find('i');
         var next_button = this.$('a.btn-next');
         var active_menu = $(page.menu_item).find('span');
         if (page.done) {
             active_menu.addClass('fa-check');
-            mark_as_done_button.removeClass('fa-square-o btn-primary');
-            mark_as_done_button.addClass('fa-check-square-o btn-default');
+            mark_as_done_button.removeClass('btn-primary');
+            mark_as_done_li.removeClass('fa-square-o');
+            mark_as_done_button.addClass('btn-default');
+            mark_as_done_li.addClass('fa-check-square-o');
             next_button.removeClass('btn-default');
             next_button.addClass('btn-primary');
 
@@ -132,10 +136,15 @@ var PlannerDialog = Widget.extend({
             }, 1000);
         } else {
             active_menu.removeClass('fa-check');
-            mark_as_done_button.removeClass('fa-check-square-o btn-default');
-            mark_as_done_button.addClass('fa-square-o btn-primary');
+            mark_as_done_button.removeClass('btn-default');
+            mark_as_done_li.removeClass('fa-check-square-o');
+            mark_as_done_button.addClass('btn-primary');
+            mark_as_done_li.addClass('fa-square-o');
             next_button.removeClass('btn-primary');
             next_button.addClass('btn-default');
+        }
+        if (page.hide_mark_as_done) {
+            next_button.removeClass('btn-default').addClass('btn-primary');
         }
     },
     _show_last_open_page: function () {
@@ -145,7 +154,7 @@ var PlannerDialog = Widget.extend({
             last_open_page = this.planner.data.last_open_page || false;
         }
 
-        if (last_open_page) {
+        if (last_open_page && this._find_page_by_id(last_open_page)) {
             this._display_page(last_open_page);
         } else {
             this._display_page(this.pages[0].id);
@@ -153,6 +162,7 @@ var PlannerDialog = Widget.extend({
     },
     update_ui_progress_bar: function(percent) {
         this.$(".progress-bar").css('width', percent+"%");
+        this.$(".o_progress_text").text(percent+"%");
     },
     _create_menu_item: function(page, menu_items, menu_item_page_map) {
         var $page = $(page.dom);
@@ -284,13 +294,14 @@ var PlannerDialog = Widget.extend({
             mark_as_done_button.show();
         }
 
-        this.$('.o_planner_title').text(this.currently_shown_page.title);
         this._render_done_page(this.currently_shown_page);
 
         this.planner.data.last_open_page = page_id;
         utils.set_cookie(this.cookie_name, page_id, 8*60*60); // create cookie for 8h
-        this.$(".o_planner_page").scrollTop("0");
+        this.$(".modal-body").scrollTop("0");
         autosize(this.$("textarea"));
+
+        this.$('.o_currently_shown_page').text(this.currently_shown_page.title);
     },
     // planner data functions
     _get_values: function(page){
@@ -388,10 +399,47 @@ var PlannerDialog = Widget.extend({
         this._render_done_page(this.currently_shown_page);
         this.update_planner();
     },
+    close_modal: function(ev) {
+        ev.preventDefault();
+        this.$el.modal('hide');
+        this.$el.detach();
+    }
 });
+
+var PlannerHelpMixin = {
+
+    on_menu_help: function(ev) {
+        ev.preventDefault();
+
+        var menu = $(ev.currentTarget).data('menu');
+        if (menu === 'about') {
+            var self = this;
+            self.rpc("/web/webclient/version_info", {}).done(function(res) {
+                var $help = $(QWeb.render("PlannerLauncher.about", {version_info: res}));
+                $help.find('a.oe_activate_debug_mode').click(function (e) {
+                    e.preventDefault();
+                    window.location = $.param.querystring( window.location.href, 'debug');
+                });
+                new Dialog(this, {
+                    size: 'medium',
+                    dialogClass: 'o_act_window',
+                    title: _t("About"),
+                    $content: $help
+                }).open();
+            });
+        } else if (menu === 'documentation') {
+            window.open('https://www.odoo.com/documentation/user', '_blank');
+        } else if (menu === 'planner') {
+            if (this.dialog) this.show_dialog();
+        } else if (menu === 'support') {
+            window.open('https://www.odoo.com/buy', '_blank');
+        }
+    },
+}
 
 return {
     PlannerDialog: PlannerDialog,
+    PlannerHelpMixin: PlannerHelpMixin,
 };
 
 });

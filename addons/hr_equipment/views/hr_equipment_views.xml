@@ -16,7 +16,7 @@
                 <separator/>
                 <filter string="My Requests" domain="['|', ('employee_id.user_id', '=', uid), ('department_id.manager_id.user_id', '=', uid)]"/>
                 <separator/>
-                <filter string="Unread Messages" name="message_unread" domain="[('message_unread','=',True)]"/>
+                <filter string="Important Messages" name="message_needaction" domain="[('message_needaction','=',True)]"/>
                 <group  expand='0' string='Group by...'>
                     <filter string='Users' domain="[]" context="{'group_by': 'user_id'}"/>
                     <filter string='Category' domain="[]" context="{'group_by' : 'category_id'}"/>
@@ -33,6 +33,8 @@
         <field name="arch" type="xml">
             <form string="Maintenance Request">
                 <header>
+                    <button string="Cancel" name="archive_equipment_request" type="object" attrs="{'invisible': [('active', '=', False)]}"/>
+                    <button string="Reset Request" name="reset_equipment_request" type="object" attrs="{'invisible': [('active', '=', True)]}"/>
                     <field name="stage_id" widget="statusbar" clickable="true" readonly="1"/>
                 </header>
                 <sheet>
@@ -42,7 +44,7 @@
                     <div class="oe_title">
                         <label for="name" class="oe_edit_only" string="Subject"/>
                         <h1>
-                            <field name="name"/>
+                            <field name="name" placeholder="Maintenance Subject"/>
                         </h1>
                     </div>
                     <group>
@@ -52,6 +54,7 @@
                             <field name="category_id" groups="base.group_hr_manager"/>
                             <field name="request_date" groups="base.group_no_one"/>
                             <field name="close_date" groups="base.group_no_one"/>
+                            <field name="active" invisible="1"/>
                         </group>
                         <group>
                             <field name="user_id" string="Repair Responsible"/>
@@ -79,7 +82,7 @@
                 <field name="user_id"/>
                 <field name="category_id"/>
                 <field name="kanban_state"/>
-                <field name="message_unread_counter"/>
+                <field name="message_needaction_counter"/>
                 <templates>
                     <t t-name="kanban-tooltip">
                        <ul class="oe_kanban_tooltip">
@@ -108,8 +111,8 @@
                                     <span class="oe_grey" t-if="record.equipment_id.raw_value"><field name="equipment_id"/><br/></span>
                                 </div>
                                 <div class="oe_kanban_footer_left" style="margin-top:2px;">
-                                    <t t-if="record.message_unread_counter.raw_value">
-                                        <span class='oe_kanban_mail_new' title='Unread Messages'><i class='fa fa-comments'/><t t-raw="record.message_unread_counter.raw_value"/></span>
+                                    <t t-if="record.message_needaction_counter.raw_value">
+                                        <span class='oe_kanban_mail_new' title='Important Messages'><i class='fa fa-comments'/><t t-raw="record.message_needaction_counter.raw_value"/></span>
                                     </t>
                                     <span t-if="record.category_id.raw_value"><field name="category_id"/></span>
                                 </div>
@@ -133,8 +136,8 @@
         <field name="name">hr.equipment.request.tree</field>
         <field name="model">hr.equipment.request</field>
         <field name="arch" type="xml">
-            <tree string="maintenance Request" fonts="bold:message_unread==True">
-                <field name="message_unread" invisible="1"/>
+            <tree string="maintenance Request" decoration-bf="message_needaction==True">
+                <field name="message_needaction" invisible="1"/>
                 <field name="name"/>
                 <field name="request_date" groups="base.group_no_one"/>
                 <field name="employee_id"/>
@@ -206,15 +209,16 @@
                         </button>
                     </div>
                     <div class="oe_title">
-                        <label for="name" class="oe_edit_only" string="Name"/>
-                        <h1><field name="name" string="Name"/></h1>
+                        <label for="name" class="oe_edit_only"/>
+                        <h1><field name="name" string="Name" placeholder="Equipment Name"/></h1>
+                        <label for="category_id" class="oe_edit_only"/>
+                        <field name="category_id" options="{&quot;no_open&quot;: True}"/>
                         <label for="serial_no" class="oe_edit_only"/>
                         <field name="serial_no"/>
                     </div>
                     <group>
                         <group>
-                            <field name="category_id" groups="base.group_equipment_manager" on_change="1" options="{&quot;no_open&quot;: True}"/>
-                            <field name="equipment_assign_to" on_change="1" widget="radio"/>
+                            <field name="equipment_assign_to" widget="radio"/>
                             <field name="employee_id" string="Employee" attrs="{'invisible': ['|', ('equipment_assign_to', '=', 'department'), ('equipment_assign_to', '=', False)]}"/>
                             <field name="department_id" string="Department" attrs="{'invisible': ['|', ('equipment_assign_to', '=', 'employee'), ('equipment_assign_to', '=', False)]}"/>
                         </group>
@@ -229,10 +233,16 @@
                             <field name="note"/>
                         </page>
                         <page string="Product Information">
-                            <group col="4">
-                                <field name="partner_id"/>
-                                <field name="cost" groups="base.group_hr_user"/>
-                                <field name="model"/>
+                            <group>
+                                <group>
+                                    <field name="partner_id"/>
+                                    <field name="partner_ref"/>
+                                    <field name="model"/>
+                                </group><group>
+                                    <field name="cost" groups="base.group_hr_user"/>
+                                    <field name="warranty"/>
+                                    <field name="location"/>
+                                </group>
                             </group>
                         </page>
                     </notebook>
@@ -256,8 +266,8 @@
                 <field name="category_id"/>
                 <field name="serial_no"/>
                 <field name="model"/>
-                <field name="message_unread_counter"/>
                 <field name="maintenance_ids"/>
+                <field name="maintenance_open_count"/>
                 <templates>
                     <t t-name="kanban-tooltip">
                         <ul class="oe_kanban_tooltip">
@@ -279,26 +289,18 @@
                                 </ul>
                             </div>
                             <div class="oe_kanban_content" tooltip="kanban-tooltip">
-                                <div><b><field name="name"/><span t-if="record.category_id.raw_value">(<field name="category_id"/>)</span></b></div>
-                                <div>
-                                    <span t-if="record.employee_id.raw_value"><field name="employee_id"/><br/></span>
-                                    <span t-if="record.department_id.raw_value"><field name="department_id"/><br/></span>
-                                    <a t-if="record.maintenance_ids.raw_value"  type="action" name="%(hr_equipment_request_action_from_equipment)d" style="margin-right: 5px">
-                                        <t t-raw="record.maintenance_ids.raw_value.length"/> Maintenance Request
-                                    </a>
-                                    <div class="oe_kanban_footer_left" style="margin-top:2px;">
-                                        <span t-if="record.serial_no.raw_value"><field name="serial_no"/><br/></span>
-                                        <span t-if="!record.employee_id.raw_value and !record.department_id.raw_value">Unassigned<br/></span>
-                                    </div>
+                                <div><b><field name="name"/><span t-if="record.model.raw_value"> (<field name="model"/>)</span></b></div>
+                                <div class="mt4">
+                                    <div t-if="record.serial_no.raw_value"><field name="serial_no"/></div>
+                                    <div t-if="!record.employee_id.raw_value and !record.department_id.raw_value">Unassigned</div>
+                                    <div t-if="record.employee_id.raw_value"><field name="employee_id"/></div>
+                                    <div t-if="record.department_id.raw_value"><field name="department_id"/></div>
                                 </div>
                                 <div class="oe_kanban_bottom_right">
                                     <img t-att-src="kanban_image('hr.employee', 'image_small', record.employee_id.raw_value)" t-att-title="record.employee_id.value" width="27" height="27" class="oe_kanban_avatar"/>
                                 </div>
-                                <div class="oe_kanban_footer_left" style="margin-top:5px;">
-                                    <t t-if="record.message_unread_counter.raw_value">
-                                        <span class='oe_kanban_mail_new' title='Unread Messages'><i class='fa fa-comments'/><t t-raw="record.message_unread_counter.raw_value"/></span>
-                                    </t>
-                                    <span t-if="record.model.raw_value"><field name="model"/></span>
+                                <div class="oe_kanban_footer_left mt4 label label-danger" t-if="record.maintenance_open_count.raw_value" >
+                                    <t t-raw="record.maintenance_open_count.raw_value"/> Request
                                 </div>
                             </div>
                             <div class="oe_clear"></div>
@@ -313,8 +315,8 @@
         <field name="name">hr.equipment.tree</field>
         <field name="model">hr.equipment</field>
         <field name="arch" type="xml">
-            <tree string="Assign To Employee"  fonts="bold:message_unread==True">
-                <field name="message_unread" invisible="1"/>
+            <tree string="Assign To Employee"  decoration-bf="message_needaction==True">
+                <field name="message_needaction" invisible="1"/>
                 <field name="name"/>
                 <field name="employee_id" string="Employee"/>
                 <field name="department_id" string="Department"/>
@@ -332,19 +334,18 @@
         <field name="model">hr.equipment</field>
         <field name="arch" type="xml">
             <search string="Search">
-                <field name="name"/>
-                <field name="serial_no"/>
+                <field name="name"  filter_domain="['|','|','|',('name','ilike',self),('model','ilike',self),('serial_no','ilike',self),('partner_ref', 'ilike', self)]"/>
                 <field name="category_id"/>
                 <field name="employee_id"/>
                 <field name="department_id"/>
-                <field name="model"/>
-                <filter string="New" help="Unassigned" domain="[('employee_id', '=', False), ('department_id', '=', False)]"/>
-                <filter string="To Do" help="Under Maintenance" domain="[('maintenance_ids', '!=', False), ('maintenance_ids.stage_id.fold', '=', False)]"/>
+                <filter string="Under Maintenance"  domain="[('maintenance_open_count', '&gt;', 0)]"/>
+                <separator/>
                 <filter string="Assigned" domain="['|', ('employee_id', '!=', False), ('department_id', '!=', False)]"/>
+                <filter string="Available" domain="[('employee_id', '=', False), ('department_id', '=', False)]"/>
                 <separator/>
-                <filter string="My Equipments" domain="['|', ('employee_id.user_id', '=', uid), ('department_id.manager_id.user_id', '=', uid)]"/>
+                <filter string="My Equipments" domain="[('employee_id.user_id', '=', uid)]"/>
                 <separator/>
-                <filter string="Unread Messages" name="message_unread" domain="[('message_unread','=',True)]"/>
+                <filter string="Important Messages" name="message_needaction" domain="[('message_needaction','=',True)]"/>
                 <group  expand='0' string='Group by...'>
                     <filter string='Users' domain="[]" context="{'group_by': 'user_id'}"/>
                     <filter string='Category' domain="[]" context="{'group_by': 'category_id'}"/>
@@ -366,9 +367,10 @@
             <p class="oe_view_nocontent_create">
                 Click to add a new equipment.
             </p><p>
-                This application helps you to track all equipment allocated to employees.
-                Create some laptop, printer or phone and link each equipment to an employee or departement.
-                You will manage allocations, issues and maintenance of equipment.
+                This application helps you to track equipments used by employees.
+                Create some laptop, printer or phone and link each equipment to
+                an employee or departement. You will manage allocations, issues
+                and maintenance of equipment.
             </p>
         </field>
     </record>
@@ -388,7 +390,7 @@
             <p class="oe_view_nocontent_create">
                 Click to add a new Engine.
             </p><p>
-                This application helps you to track all equipment allocated to employees.
+                This application helps you to track equipments used by employees.
                 Create some laptop, printer or phone and link each equipment to an employee or departement.
                 You will manage allocations, issues and mainteannce of equipment.
             </p>
@@ -407,7 +409,7 @@
                         class="oe_stat_button"
                         icon="fa-laptop"
                         type="action">
-                        <field string="Equipment" name="equipment_count" widget="statinfo"/>
+                        <field string="Equipments" name="equipment_count" widget="statinfo"/>
                     </button>
                     <button name="%(hr_equipment_request_action_link)d"
                         type="action"
@@ -502,6 +504,7 @@
                 <field name="sequence" widget="handle"/>
                 <field name="name"/>
                 <field name="fold"/>
+                <field name="done"/>
             </tree>
         </field>
     </record>
@@ -541,7 +544,7 @@
         parent="menu_equipment_title"
         action="hr_equipment_request_action"
         groups="base.group_hr_manager,base.group_hr_user,base.group_user"
-        sequence="1"/>
+        sequence="2"/>
 
     <menuitem
         id="menu_hr_equipment_form"
@@ -549,7 +552,7 @@
         parent="menu_equipment_title"
         action="hr_equipment_action"
         groups="base.group_hr_manager,base.group_hr_user,base.group_user"
-        sequence="2"/>
+        sequence="1"/>
 
     <menuitem
         id="menu_equipment_global_settings"
@@ -574,4 +577,16 @@
         groups="base.group_no_one"
         sequence="2" />
 
+    <data noupdate="1">
+        <!-- After installation of the module, open the related menu -->
+        <record id="action_client_hr_equipment_menu" model="ir.actions.client">
+            <field name="name">Open Equipments Menu</field>
+            <field name="tag">reload</field>
+            <field name="params" eval="{'menu_id': ref('menu_equipment_title')}"/>
+        </record>
+        <record id="base.open_menu" model="ir.actions.todo">
+            <field name="action_id" ref="action_client_hr_equipment_menu"/>
+            <field name="state">open</field>
+        </record>
+    </data>
 </odoo>

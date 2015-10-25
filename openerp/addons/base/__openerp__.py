@@ -35,7 +35,7 @@ The kernel of OpenERP, needed for all installation.
         'ir/ir_ui_menu_view.xml',
         'ir/ir_ui_view_view.xml',
         'ir/ir_values_view.xml',
-        'ir/osv_memory_autovacuum.xml',
+        'ir/ir_autovacuum.xml',
         'ir/ir_model_report.xml',
         'ir/report_ir_model.xml',
         'ir/ir_logging_view.xml',
@@ -69,6 +69,7 @@ The kernel of OpenERP, needed for all installation.
     'demo': [
         'base_demo.xml',
         'res/res_currency_demo.xml',
+        'res/res_bank_demo.xml',
         'res/res_partner_demo.xml',
         'res/res_partner_demo.yml',
         'res/res_partner_image_demo.xml',

@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 
 {
-    'name': 'Track Employees Equipment',
+    'name': 'Equipments',
     'version': '1.0',
+    'sequence': 125,
     'description': """
-        Track employees' equipment and manage its allocation """,
+        Track employees' equipment and manage maintenance requests.""",
     'author': 'Odoo S.A.',
     'depends': ['hr'],
+    'summary': 'Equipments, Assets, Internal Hardware, Allocation Tracking',
     'data': [
         'security/hr_equipment.xml',
         'security/ir.model.access.csv',

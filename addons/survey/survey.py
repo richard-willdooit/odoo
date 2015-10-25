@@ -3,6 +3,7 @@
 
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
+from openerp import SUPERUSER_ID
 from openerp.tools import DEFAULT_SERVER_DATETIME_FORMAT as DF
 from openerp.addons.website.models.website import slug
 from urlparse import urljoin
@@ -517,15 +518,6 @@ class survey_page(osv.Model):
         'sequence': 10
     }
 
-    # Public methods #
-
-    def copy_data(self, cr, uid, ids, default=None, context=None):
-        current_rec = self.read(cr, uid, ids, fields=['title'], context=context)
-        title = _("%s (copy)") % (current_rec.get('title'))
-        default = dict(default or {}, title=title)
-        return super(survey_page, self).copy_data(cr, uid, ids, default,
-            context=context)
-
 
 class survey_question(osv.Model):
     ''' Questions that will be asked in a survey.
@@ -640,13 +632,6 @@ class survey_question(osv.Model):
 
     def onchange_validation_email(self, cr, uid, ids, validation_email, context=None):
         return {'value': {'validation_required': False}} if validation_email else {}
-
-    def copy_data(self, cr, uid, ids, default=None, context=None):
-        current_rec = self.read(cr, uid, ids, context=context)
-        question = _("%s (copy)") % (current_rec.get('question'))
-        default = dict(default or {}, question=question)
-        return super(survey_question, self).copy_data(cr, uid, ids, default,
-            context=context)
 
     # Validation methods
 
@@ -844,7 +829,7 @@ class survey_user_input(osv.Model):
         'survey_id': fields.many2one('survey.survey', 'Survey', required=True,
                                      readonly=1, ondelete='restrict'),
         'date_create': fields.datetime('Creation Date', required=True,
-                                       readonly=1),
+                                       readonly=1, copy=False),
         'deadline': fields.datetime("Deadline",
                                 help="Date by which the person can open the survey and submit answers",
                                 oldname="date_deadline"),
@@ -857,7 +842,7 @@ class survey_user_input(osv.Model):
                                   'Status',
                                   readonly=True),
         'test_entry': fields.boolean('Test entry', readonly=1),
-        'token': fields.char("Identification token", readonly=1, required=1),
+        'token': fields.char("Identification token", readonly=1, required=1, copy=False),
 
         # Optional Identification data
         'partner_id': fields.many2one('res.partner', 'Partner', readonly=1),
@@ -868,7 +853,7 @@ class survey_user_input(osv.Model):
                                               'Last displayed page'),
         # The answers !
         'user_input_line_ids': fields.one2many('survey.user_input_line',
-                                               'user_input_id', 'Answers'),
+                                               'user_input_id', 'Answers', copy=True),
 
         # URLs used to display the answers
         'result_url': fields.related('survey_id', 'result_url', type='char',
@@ -890,9 +875,6 @@ class survey_user_input(osv.Model):
         ('unique_token', 'UNIQUE (token)', 'A token must be unique!'),
         ('deadline_in_the_past', 'CHECK (deadline >= date_create)', 'The deadline cannot be in the past')
     ]
-
-    def copy_data(self, cr, uid, id, default=None, context=None):
-        raise UserError(_('You cannot duplicate this element!'))
 
     def do_clean_emptys(self, cr, uid, automatic=False, context=None):
         ''' Remove empty user inputs that have been created manually
@@ -1022,9 +1004,6 @@ class survey_user_input_line(osv.Model):
             vals.update({'quizz_mark': self.__get_mark(cr, uid, value_suggested)})
         return super(survey_user_input_line, self).write(cr, uid, ids, vals, context=context)
 
-    def copy_data(self, cr, uid, id, default=None, context=None):
-        raise UserError(_('You cannot duplicate this element!'))
-
     def save_lines(self, cr, uid, user_input_id, question, post, answer_tag,
                    context=None):
         ''' Save answers to questions, depending on question type
@@ -1140,7 +1119,7 @@ class survey_user_input_line(osv.Model):
                                         ('question_id', '=', question.id)],
                               context=context)
         if old_uil:
-            self.unlink(cr, uid, old_uil, context=context)
+            self.unlink(cr, SUPERUSER_ID, old_uil, context=context)
 
         if answer_tag in post and post[answer_tag].strip() != '':
             vals.update({'answer_type': 'suggestion', 'value_suggested': post[answer_tag]})
@@ -1171,7 +1150,7 @@ class survey_user_input_line(osv.Model):
                                         ('question_id', '=', question.id)],
                               context=context)
         if old_uil:
-            self.unlink(cr, uid, old_uil, context=context)
+            self.unlink(cr, SUPERUSER_ID, old_uil, context=context)
 
         ca = dict_keys_startswith(post, answer_tag)
         comment_answer = ca.pop(("%s_%s" % (answer_tag, 'comment')), '').strip()
@@ -1202,7 +1181,7 @@ class survey_user_input_line(osv.Model):
                                         ('question_id', '=', question.id)],
                               context=context)
         if old_uil:
-            self.unlink(cr, uid, old_uil, context=context)
+            self.unlink(cr, SUPERUSER_ID, old_uil, context=context)
 
         no_answers = True
         ca = dict_keys_startswith(post, answer_tag)

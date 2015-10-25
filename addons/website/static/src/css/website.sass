@@ -90,9 +90,8 @@ hr
 .para_large
     font-size: 120%
 
-.jumbotron.para_large p{
-  font-size: 150%;
-}
+.jumbotron.para_large p
+    font-size: 150%
 
 .readable
     font-size: 120%
@@ -144,10 +143,6 @@ body > nav.navbar
         padding-top: 34px
 
 /* ----- BOOTSTRAP FIX ----- */
-
-.col-md-12
-    float: left
-    width: 100%
 
 @-moz-document url-prefix()
     .table .img-responsive
@@ -620,6 +615,10 @@ div.carousel
     .navbar-nav.navbar-right:last-child
         margin-right: 0 !important
 
+/* ---- footer style ---- {{{ */
+#footer div.row
+    word-wrap: break-word
+
 .container
     nav#oe_main_menu_navbar
         position: inherit
@@ -648,3 +647,7 @@ div.carousel
     -webkit-box-shadow: 0 3px 9px #666666
     box-shadow: 0 3px 9px #666666
 
+.tour
+    .popover-navigation
+        margin-left: 13px
+        margin-bottom: 8px

@@ -4,17 +4,16 @@
 {
     'name': 'Project Management',
     'version': '1.1',
-    'author': 'OpenERP SA',
     'website': 'https://www.odoo.com/page/project-management',
     'category': 'Project Management',
-    'sequence': 8,
+    'sequence': 10,
     'summary': 'Projects, Tasks',
     'depends': [
         'base_setup',
         'product',
         'analytic',
-        'board',
         'mail',
+        'portal',
         'resource',
         'web_kanban',
         'web_tip',
@@ -49,6 +48,7 @@ Dashboard / Reports for Project Management will include:
         'project_dashboard.xml',
         'web_planner_data.xml',
     ],
+    'qweb': ['static/src/xml/project.xml'],
     'demo': ['project_demo.xml'],
     'test': [
     ],

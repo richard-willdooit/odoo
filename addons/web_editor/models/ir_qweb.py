@@ -9,12 +9,13 @@ Also, adds methods to convert values back to openerp models.
 import cStringIO
 import datetime
 import itertools
+import json
 import logging
 import os
 import urllib2
 import urlparse
 import re
-import simplejson
+import hashlib
 
 import pytz
 from dateutil import parser
@@ -164,7 +165,7 @@ class Contact(orm.AbstractModel):
             cr, uid, field_name, record, options, source_element, g_att, t_att,
             qweb_context, context=context)
         if getattr(record, field_name):
-            return itertools.chain(attrs, [('data-oe-contact-options', simplejson.dumps(options))])
+            return itertools.chain(attrs, [('data-oe-contact-options', json.dumps(options))])
         else:
             return attrs
 
@@ -240,7 +241,7 @@ class DateTime(orm.AbstractModel):
             return False
 
         # parse from string to datetime
-        dt = datetime.datetime.strptime(value, DEFAULT_SERVER_DATETIME_FORMAT)
+        dt = parser.parse(value)
 
         # convert back from user's timezone to UTC
         tz_name = context.get('tz') \
@@ -329,15 +330,25 @@ class Image(orm.AbstractModel):
         classes = ' '.join(itertools.imap(escape, aclasses))
 
         max_size = None
-        max_width, max_height = options.get('max_width', 0), options.get('max_height', 0)
-        if max_width or max_height:
-            max_size = '%sx%s' % (max_width, max_height)
-
-        src = self.pool['ir.attachment'].image_url(cr, uid, record, field_name, max_size)
         if options.get('resize'):
-            src = "%s/%s" % (src, options.get('resize'))
+            max_size = options.get('resize')
+        else:
+            max_width, max_height = options.get('max_width', 0), options.get('max_height', 0)
+            if max_width or max_height:
+                max_size = '%sx%s' % (max_width, max_height)
 
-        img = '<img class="%s" src="%s" style="%s"/>' % (classes, src, options.get('style', ''))
+        sha = hashlib.sha1(getattr(record, '__last_update')).hexdigest()[0:7]
+        max_size = '' if max_size is None else '/%s' % max_size
+        src = '/web/image/%s/%s/%s%s?unique=%s' % (record._name, record.id, field_name, max_size, sha)
+
+        alt = None
+        if options.get('alt-field') and getattr(record, options['alt-field'], None):
+            alt = record[options['alt-field']]
+        elif options.get('alt'):
+            alt = options['alt']
+
+        img = '<img class="%s" src="%s" style="%s"%s/>' % \
+            (classes, src, options.get('style', ''), ' alt="%s"' % alt if alt else '')
         return ir_qweb.HTMLSafe(img)
 
     local_url_re = re.compile(r'^/(?P<module>[^]]+)/static/(?P<rest>.+)$')
@@ -346,13 +357,18 @@ class Image(orm.AbstractModel):
         url = element.find('img').get('src')
 
         url_object = urlparse.urlsplit(url)
-        if url_object.path.startswith('/web_editor/image'):
-            # url might be /web_editor/image/<model>/<id>[_<checksum>]/<field>[/<width>x<height>]
+        if url_object.path.startswith('/web/image'):
+            # url might be /web/image/<model>/<id>[_<checksum>]/<field>[/<width>x<height>]
             fragments = url_object.path.split('/')
             query = dict(urlparse.parse_qsl(url_object.query))
-            model = query.get('model', fragments[3])
-            oid = query.get('id', fragments[4].split('_')[0])
-            field = query.get('field', fragments[5])
+            if fragments[3].isdigit():
+                model = 'ir.attachment'
+                oid = fragments[3]
+                field = 'datas'
+            else:
+                model = query.get('model', fragments[3])
+                oid = query.get('id', fragments[4].split('_')[0])
+                field = query.get('field', fragments[5])
             item = self.pool[model].browse(cr, uid, int(oid), context=context)
             return item[field]
 

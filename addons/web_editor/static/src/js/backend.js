@@ -47,6 +47,14 @@ var FieldTextHtmlSimple = widget.extend({
             }
         };
     },
+    start: function() {
+        var def = this._super.apply(this, arguments);
+        this.$translate.remove();
+        this.$translate = $();
+        // Triggers a mouseup to refresh the editor toolbar
+        this.$content.trigger('mouseup');
+        return def;
+    },
     initialize_content: function() {
         var self = this;
         this.$textarea = this.$("textarea").val(this.get('value') || "<p><br/></p>");
@@ -89,6 +97,10 @@ var FieldTextHtmlSimple = widget.extend({
             value = value.replace('<p><p>', '<p>').replace('</p></p>', '</p>');
         }
         return value;
+    },
+    focus: function() {
+        var input = !this.get("effective_readonly") && this.$textarea;
+        return input ? input.focus() : false;
     },
     render_value: function() {
         var value = this.get('value');
@@ -163,7 +175,10 @@ var FieldTextHtml = widget.extend({
         };
         $(window).on('resize', self.resize);
 
-        return this._super();
+        var def = this._super.apply(this, arguments);
+        this.$translate.remove();
+        this.$translate = $();
+        return def;
     },
     get_url: function (_attr) {
         var src = this.options.editor_url ? this.options.editor_url+"?" : "/web_editor/field/html?";
@@ -225,6 +240,7 @@ var FieldTextHtml = widget.extend({
         this.document = this.$iframe.contents()[0];
         this.$body = $("body", this.document);
         this.$content = this.$body.find("#editable_area");
+        this._toggle_label();
         this.lang = this.$iframe.attr('src').match(/[?&]lang=([^&]+)/);
         this.lang = this.lang ? this.lang[1] : this.view.dataset.context.lang;
         this._dirty_flag = false;
@@ -290,7 +306,9 @@ var FieldTextHtml = widget.extend({
             }
         } else {
             this.$content.html(value);
-            this.$iframe.css("height", (this.$body.height()+20) + "px");
+            if (this.$iframe[0].contentWindow) {
+                this.$iframe.css("height", (this.$body.height()+20) + "px");
+            }
         }
     },
     is_false: function() {

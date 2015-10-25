@@ -43,6 +43,7 @@ var KanbanView = View.extend({
         'kanban_record_update': 'update_record',
         'kanban_column_add_record': 'add_record_to_column',
         'kanban_column_delete': 'delete_column',
+        'kanban_column_archive_records': 'archive_records',
         'column_add_record': 'column_add_record',
         'quick_create_add_column': 'add_new_column',
         'kanban_load_more': 'load_more',
@@ -215,10 +216,11 @@ var KanbanView = View.extend({
             } else {
                 _.each(groups, function (group) {
                     var value = group.attributes.value;
+                    group.id = value instanceof Array ? value[0] : value;
                     var field = self.fields_view.fields[self.group_by_field];
                     if (field && field.type === "selection") {
-                        value= _.find(field.selection, function (s) { return s[0] === group.attributes.value; });
-                    } 
+                        value= _.find(field.selection, function (s) { return s[0] === group.id; });
+                    }
                     group.title = (value instanceof Array ? value[1] : value) || _t("Undefined");
                     group.values = {};
                 });
@@ -248,7 +250,7 @@ var KanbanView = View.extend({
                     def = dataset.read_slice(self.fields_keys.concat(['__last_update']), { 'limit': self.limit });
                 }
                 return def.then(function (records) {
-                    self.dataset.ids.push.apply(self.dataset.ids, dataset.ids);
+                    self.dataset.ids.push.apply(self.dataset.ids, _.difference(dataset.ids, self.dataset.ids));
                     group.records = records;
                     group.dataset = dataset;
                     is_empty = is_empty && !records.length;
@@ -261,7 +263,6 @@ var KanbanView = View.extend({
                     grouped: true,
                 };
             });
-            return def;
         });
     },
 
@@ -270,6 +271,9 @@ var KanbanView = View.extend({
             return false;
         }
         return this._super(action);
+    },
+    has_active_field: function() {
+        return this.fields_view.fields.active;
     },
     _is_quick_create_enabled: function() {
         if (!this.quick_creatable || !this.is_action_enabled('create'))
@@ -394,6 +398,7 @@ var KanbanView = View.extend({
         return {
             editable: this.is_action_enabled('group_edit'),
             deletable: this.is_action_enabled('group_delete'),
+            has_active_field: this.has_active_field(),
             grouped_by_m2o: this.grouped_by_m2o,
             relation: this.relation,
             qweb: this.qweb,
@@ -425,13 +430,13 @@ var KanbanView = View.extend({
             forcePlaceholderSize: true,
             stop: function () {
                 var ids = [];
-                self.$('.o_kanban_group').each(function (index, u) { 
+                self.$('.o_kanban_group').each(function (index, u) {
                     ids.push($(u).data('id'));
                 });
                 self.resequence(ids);
             },
         });
-        if (this.is_action_enabled('group_create')) {
+        if (this.is_action_enabled('group_create') && this.grouped_by_m2o) {
             this.column_quick_create = new ColumnQuickCreate(this);
             this.column_quick_create.appendTo(fragment);
         }
@@ -528,17 +533,18 @@ var KanbanView = View.extend({
         });
        _.each(relations, function(rel, rel_name) {
             var dataset = new data.DataSetSearch(self, rel_name, self.dataset.get_context(rel.context));
-            dataset.name_get(_.uniq(rel.ids)).done(function(result) {
-                result.forEach(function(nameget) {
-                    // white color (0) should not be selected, 1 instead
-                    var color = KanbanRecord.prototype.kanban_getcolor(nameget[1]) + 1;
-                    var $tag = $('<span>')
-                        .addClass('o_tag oe_kanban_color_' + color)
-                        .attr('title', _.str.escapeHTML(nameget[1]));
-                    $(rel.elements[nameget[0]]).append($tag);
+            dataset.read_ids(_.uniq(rel.ids), ['name', 'color']).done(function(result) {
+                result.forEach(function(record) {
+                    // Does not display the tag if color = 0
+                    if (record['color']){
+                        var $tag = $('<span>')
+                            .addClass('o_tag o_tag_color_' + record['color'])
+                            .attr('title', _.str.escapeHTML(record['name']));
+                        $(rel.elements[record['id']]).append($tag);
+                    }
                 });
                 // we use boostrap tooltips for better and faster display
-                self.$('span.o_tag').tooltip();
+                self.$('span.o_tag').tooltip({delay: {'show': 50}});
             });
         });
     },
@@ -572,6 +578,23 @@ var KanbanView = View.extend({
                 self.do_reload();
             }
         });
+    },
+
+    archive_records: function(event) {
+        if (!this.has_active_field()) {
+            return;
+        }
+        var active_value = !event.data.archive;
+        var record_ids = [];
+        _.each(event.target.records, function(kanban_record) {
+            if (kanban_record.record.active.value != active_value) {
+                record_ids.push(kanban_record.id);
+            }
+        });
+        if (record_ids.length) {
+            this.dataset.call('write', [record_ids, {active: active_value}])
+                        .done(this.do_reload);
+        }
     },
 
     reload_record: function (record) {
@@ -615,7 +638,7 @@ var KanbanView = View.extend({
         var self = this;
         var column = event.target;
         var context = {};
-        context['default_' + this.group_by_field] = column.values.id;
+        context['default_' + this.group_by_field] = column.id;
         var name = event.data.value;
         this.dataset.name_create(name, context).then(function on_success (data) {
             add_record(data[0]);
@@ -729,7 +752,7 @@ function transform_qweb_template (node, fvg, many2manys) {
         case 'button':
         case 'a':
             var type = node.attrs.type || '';
-            if (_.indexOf('action,object,edit,open,delete,url'.split(','), type) !== -1) {
+            if (_.indexOf('action,object,edit,open,delete,url,set_cover'.split(','), type) !== -1) {
                 _.each(node.attrs, function(v, k) {
                     if (_.indexOf('icon,type,name,args,string,context,states,kanban_states'.split(','), k) != -1) {
                         node.attrs['data-' + k] = v;
@@ -780,4 +803,3 @@ core.one2many_view_registry.add('kanban', One2ManyKanbanView);
 return KanbanView;
 
 });
-

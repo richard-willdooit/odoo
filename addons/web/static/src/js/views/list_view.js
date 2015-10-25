@@ -227,6 +227,7 @@ var ListView = View.extend( /** @lends instance.web.ListView# */ {
         var self = this;
         this.fields_view = data;
         this.name = "" + this.fields_view.arch.attrs.string;
+        this._limit = parseInt(this.fields_view.arch.attrs.limit, 10) || this._limit;
 
         // Retrieve the decoration defined on the model's list view
         this.decoration = _.pick(this.fields_view.arch.attrs, function(value, key) {
@@ -298,12 +299,14 @@ var ListView = View.extend( /** @lends instance.web.ListView# */ {
      **/
     render_sidebar: function($node) {
         if (!this.sidebar && this.options.sidebar) {
-            this.sidebar = new Sidebar(this);
+            this.sidebar = new Sidebar(this, {editable: this.is_action_enabled('edit')});
             if (this.fields_view.toolbar) {
                 this.sidebar.add_toolbar(this.fields_view.toolbar);
             }
             this.sidebar.add_items('other', _.compact([
                 { label: _t("Export"), callback: this.on_sidebar_export },
+                this.fields_view.fields.active && {label: _t("Archive"), callback: this.do_archive_selected},
+                this.fields_view.fields.active && {label: _t("Unarchive"), callback: this.do_unarchive_selected},
                 this.is_action_enabled('delete') && { label: _t('Delete'), callback: this.do_delete_selected }
             ]));
 
@@ -551,7 +554,7 @@ var ListView = View.extend( /** @lends instance.web.ListView# */ {
                     return r.tag === 'field';
                 }), 'name'),
             {check_access_rule: true}
-        ).done(function (records) {
+        ).then(function (records) {
             var values = records[0];
             if (!values) {
                 self.records.remove(record);
@@ -563,6 +566,15 @@ var ListView = View.extend( /** @lends instance.web.ListView# */ {
                 record.set(key, value, {silent: true});            
             });
             record.trigger('change', record);
+
+            /* When a record is reloaded, there is a rendering lag because of the addition/suppression of 
+            a table row. Since the list view editable need to wait for the end of this rendering lag before
+            computing the position of the editable fields, a 100ms delay is added. */
+            var def = $.Deferred();
+            setTimeout(function() {
+                def.resolve(records);
+            }, 100);
+            return def;
         });
     },
 
@@ -742,6 +754,30 @@ var ListView = View.extend( /** @lends instance.web.ListView# */ {
             this.do_delete(this.groups.get_selection().ids);
         } else {
             this.do_warn(_t("Warning"), _t("You must select at least one record."));
+        }
+    },
+    /**
+     * Handles archiving/unarchiving of selected lines
+     */
+    do_archive_selected: function () {
+        var records = this.groups.get_selection().records;
+        this.do_archive(records, true);
+    },
+    do_unarchive_selected: function () {
+        var records = this.groups.get_selection().records;
+        this.do_archive(records, false);
+    },
+    do_archive: function (records, archive) {
+        var active_value = !archive;
+        var record_ids = [];
+        _.each(records, function(record) {
+            if (record.active != active_value) {
+                record_ids.push(record.id);
+            }
+        });
+        if (record_ids.length) {
+            this.dataset.call('write', [record_ids, {active: active_value}])
+                        .done(_.bind(this.reload, this));
         }
     },
     /**
@@ -984,7 +1020,10 @@ ListView.List = Class.extend( /** @lends instance.web.ListView.List# */{
                     $row = self.$current.children(
                         '[data-id=' + record.get('id') + ']');
                 }
-                $row.replaceWith(self.render_record(record));
+
+                var $newRow = $(self.render_record(record));
+                $newRow.find('.oe_list_record_selector input').prop('checked', !!$row.find('.oe_list_record_selector input').prop('checked'));
+                $row.replaceWith($newRow);
             },
             'add': function (ev, records, record, index) {
                 var $new_row = $(self.render_record(record));
@@ -1116,12 +1155,14 @@ ListView.List = Class.extend( /** @lends instance.web.ListView.List# */{
                 var ids;
                 // they come in two shapes:
                 if (value[0] instanceof Array) {
-                    var command = value[0];
-                    // 1. an array of m2m commands (usually (6, false, ids))
-                    if (command[0] !== 6) {
-                        throw new Error(_.str.sprintf( _t("Unknown m2m command %s"), command[0]));
-                    }
-                    ids = command[2];
+                    _.each(value, function(command) {
+                        switch (command[0]) {
+                            case 4: ids.push(command[1]); break;
+                            case 5: ids = []; break;
+                            case 6: ids = command[2]; break;
+                            default: throw new Error(_.str.sprintf( _t("Unknown m2m command %s"), command[0]));
+                        }
+                    });
                 } else {
                     // 2. an array of ids
                     ids = value;
@@ -1144,11 +1185,11 @@ ListView.List = Class.extend( /** @lends instance.web.ListView.List# */{
     },
     render: function () {
         var self = this;
-        this.$current.empty().append(
-            QWeb.render('ListView.rows', _.extend({
+        this.$current.html(
+            QWeb.render('ListView.rows', _.extend({}, this, {
                     render_cell: function () {
                         return self.render_cell.apply(self, arguments); }
-                }, this)));
+                })));
         this.pad_table_to(4);
     },
     pad_table_to: function (count) {
@@ -1595,32 +1636,34 @@ ListView.Groups = Class.extend( /** @lends instance.web.ListView.Groups# */{
                     return;
                 }
 
-                list.records.remove(to_move);
+                list.records.remove(to_move, {silent: true});
                 var to = target_id ? list.records.indexOf(target) + 1 : 0;
-                list.records.add(to_move, { at: to });
+                list.records.add(to_move, { at: to, silent: true });
 
                 // resequencing time!
                 var record, index = to,
                     // if drag to 1st row (to = 0), start sequencing from 0
                     // (exclusive lower bound)
                     seq = to ? list.records.at(to - 1).get(seqname) : 0;
+                var defs = [];
                 var fct = function (dataset, id, seq) {
-                    $.async_when().done(function () {
+                    defs.push($.async_when().then(function () {
                         var attrs = {};
                         attrs[seqname] = seq;
-                        dataset.write(id, attrs);
-                    });
+                        return dataset.write(id, attrs, {internal_dataset_changed: true});
+                    }));
                 };
                 while (++seq, (record = list.records.at(index++))) {
                     // write are independent from one another, so we can just
                     // launch them all at the same time and we don't really
                     // give a fig about when they're done
-                    // FIXME: breaks on o2ms (e.g. Accounting > Financial
-                    //        Accounting > Taxes > Taxes, child tax accounts)
-                    //        when synchronous (without setTimeout)
                     fct(dataset, record.get('id'), seq);
                     record.set(seqname, seq);
                 }
+                $.when.apply($, defs).then(function () {
+                    // use internal_dataset_changed and trigger one onchange after all writes
+                    dataset.trigger("dataset_changed");
+                });
             }
         });
     },
@@ -1910,7 +1953,7 @@ var ColumnBinary = Column.extend({
         if (value.substr(0, 10).indexOf(' ') == -1) {
             download_url = "data:application/octet-stream;base64," + value;
         } else {
-            download_url = session.url('/web/binary/saveas', {model: options.model, field: this.id, id: options.id});
+            download_url = session.url('/web/content', {model: options.model, field: this.id, id: options.id, download: true});
             if (this.filename) {
                 download_url += '&filename_field=' + this.filename;
             }

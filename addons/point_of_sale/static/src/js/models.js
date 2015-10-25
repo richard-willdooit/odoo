@@ -287,7 +287,7 @@ exports.PosModel = Backbone.Model.extend({
         loaded: function(self, pricelists){ self.pricelist = pricelists[0]; },
     },{
         model: 'res.currency',
-        fields: ['name','symbol','position','rounding','accuracy'],
+        fields: ['name','symbol','position','rounding'],
         ids:    function(self){ return [self.pricelist.currency_id[0]]; },
         loaded: function(self, currencies){
             self.currency = currencies[0];
@@ -315,7 +315,7 @@ exports.PosModel = Backbone.Model.extend({
     },{
         model:  'product.product',
         fields: ['display_name', 'list_price','price','pos_categ_id', 'taxes_id', 'barcode', 'default_code', 
-                 'to_weight', 'uom_id', 'uos_id', 'uos_coeff', 'mes_type', 'description_sale', 'description',
+                 'to_weight', 'uom_id', 'description_sale', 'description',
                  'product_tmpl_id'],
         order:  ['sequence','name'],
         domain: [['sale_ok','=',true],['available_in_pos','=',true]],
@@ -371,6 +371,40 @@ exports.PosModel = Backbone.Model.extend({
             });
 
         },
+    },  {
+        model:  'account.fiscal.position',
+        fields: [],
+        domain: function(self){ return [['id','in',self.config.fiscal_position_ids]]; },
+        loaded: function(self, fiscal_positions){
+            self.fiscal_positions = fiscal_positions;
+        }
+    }, {
+        model:  'account.fiscal.position.tax',
+        fields: [],
+        domain: function(self){
+            var fiscal_position_tax_ids = [];
+
+            self.fiscal_positions.forEach(function (fiscal_position) {
+                fiscal_position.tax_ids.forEach(function (tax_id) {
+                    fiscal_position_tax_ids.push(tax_id);
+                });
+            });
+
+            return [['id','in',fiscal_position_tax_ids]];
+        },
+        loaded: function(self, fiscal_position_taxes){
+            self.fiscal_position_taxes = fiscal_position_taxes;
+            self.fiscal_positions.forEach(function (fiscal_position) {
+                fiscal_position.fiscal_position_taxes_by_id = {};
+                fiscal_position.tax_ids.forEach(function (tax_id) {
+                    var fiscal_position_tax = _.find(fiscal_position_taxes, function (fiscal_position_tax) {
+                        return fiscal_position_tax.id === tax_id;
+                    });
+
+                    fiscal_position.fiscal_position_taxes_by_id[fiscal_position_tax.id] = fiscal_position_tax;
+                });
+            });
+        }
     },  {
         label: 'fonts',
         loaded: function(){
@@ -1269,19 +1303,35 @@ exports.Orderline = Backbone.Model.extend({
         }
         return taxes;
     },
+    _map_tax_fiscal_position: function(tax) {
+        var current_order = this.pos.get_order();
+        var order_fiscal_position = current_order && current_order.fiscal_position;
+
+        if (order_fiscal_position) {
+            var mapped_tax = _.find(order_fiscal_position.fiscal_position_taxes_by_id, function (fiscal_position_tax) {
+                return fiscal_position_tax.tax_src_id[0] === tax.id;
+            });
+
+            if (mapped_tax) {
+                tax = this.pos.taxes_by_id[mapped_tax.tax_dest_id[0]];
+            }
+        }
+
+        return tax;
+    },
     _compute_all: function(tax, base_amount, quantity) {
         if (tax.amount_type === 'fixed') {
             var ret = tax.amount * quantity;
             return base_amount >= 0 ? ret : ret * -1;
         }
         if ((tax.amount_type === 'percent' && !tax.price_include) || (tax.amount_type === 'division' && tax.price_include)){
-            return base_amount * tax.amount / 100;
+            return (base_amount * tax.amount / 100) * quantity;
         }
         if (tax.amount_type === 'percent' && tax.price_include){
-            return base_amount - (base_amount / (1 + tax.amount / 100));
+            return (base_amount - (base_amount / (1 + tax.amount / 100))) * quantity;
         }
         if (tax.amount_type === 'division' && !tax.price_include) {
-            return base_amount / (1 - tax.amount / 100) - base_amount;
+            return (base_amount / (1 - tax.amount / 100) - base_amount) * quantity;
         }
         return false;
     },
@@ -1295,12 +1345,13 @@ exports.Orderline = Backbone.Model.extend({
            currency_rounding = currency_rounding * 0.00001;
         }
         _(taxes).each(function(tax) {
+            tax = self._map_tax_fiscal_position(tax);
             if (tax.amount_type === 'group'){
                 var ret = self.compute_all(tax.children_tax_ids, price_unit, quantity, currency_rounding);
                 total_excluded = ret.total_excluded;
                 base = ret.total_excluded;
                 total_included = ret.total_included;
-                list_taxes.concat(ret.taxes)
+                list_taxes.concat(ret.taxes);
             }
             else {
                 var tax_amount = self._compute_all(tax, price_unit, quantity);
@@ -1321,8 +1372,8 @@ exports.Orderline = Backbone.Model.extend({
                         id: tax.id,
                         amount: tax_amount,
                         name: tax.name,
-                    }
-                    list_taxes.push(data)
+                    };
+                    list_taxes.push(data);
                 }
             }
         });
@@ -1540,6 +1591,7 @@ exports.Order = Backbone.Model.extend({
             uid: this.uid,
             sequence_number: this.sequence_number,
             creation_date: this.creation_date,
+            fiscal_position_id: this.fiscal_position ? this.fiscal_position.id : false
         };
     },
     export_for_printing: function(){
@@ -1721,6 +1773,10 @@ exports.Order = Backbone.Model.extend({
         this.select_orderline(this.get_last_orderline());
     },
     add_product: function(product, options){
+        if(this._printed){
+            this.destroy();
+            return this.pos.get_order().add_product(product, options);
+        }
         this.assert_editable();
         options = options || {};
         var attr = JSON.parse(JSON.stringify(product));

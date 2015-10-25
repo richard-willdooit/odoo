@@ -5,7 +5,7 @@
 # http://www.thinkopensolutions.com.
 
 {
-    'name': 'Portugal - Chart of Accounts',
+    'name': 'Portugal - Accounting',
     'version': '0.011',
     'author': 'ThinkOpen Solutions',
     'website': 'http://www.thinkopensolutions.com/',
@@ -16,13 +16,12 @@
                 'account',
                 ],
     'data': [
-                   'account_types.xml',
                    'account_chart.xml',
                    'account_chart_template.xml',
                    'fiscal_position_templates.xml',
                    'account_taxes.xml',
-                   'l10n_chart_pt_wizard.xml',
+                   'account_chart_template.yml',
                    ],
     'demo': [],
-    'installable': False,
+    'installable': True,
 }

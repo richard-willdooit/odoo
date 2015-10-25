@@ -52,8 +52,6 @@ class hr_timesheet_sheet(osv.osv):
         if 'employee_id' in vals:
             if not self.pool.get('hr.employee').browse(cr, uid, vals['employee_id'], context=context).user_id:
                 raise UserError(_('In order to create a timesheet for this employee, you must link him/her to a user.'))
-            if not self.pool.get('hr.employee').browse(cr, uid, vals['employee_id'], context=context).journal_id:
-                raise UserError(_('In order to create a timesheet for this employee, you must assign an analytic journal to the employee, like \'Timesheet Journal\'.'))
         if vals.get('attendances_ids'):
             # If attendances, we sort them by date asc before writing them, to satisfy the alternance constraint
             vals['attendances_ids'] = self.sort_attendances(cr, uid, vals['attendances_ids'], context=context)
@@ -68,8 +66,6 @@ class hr_timesheet_sheet(osv.osv):
                 raise UserError(_('You cannot have 2 timesheets that overlap!\nYou should use the menu \'My Timesheet\' to avoid this problem.'))
             if not self.pool.get('hr.employee').browse(cr, uid, vals['employee_id'], context=context).product_id:
                 raise UserError(_('In order to create a timesheet for this employee, you must link the employee to a product.'))
-            if not self.pool.get('hr.employee').browse(cr, uid, vals['employee_id'], context=context).journal_id:
-                raise UserError(_('In order to create a timesheet for this employee, you must assign an analytic journal to the employee, like \'Timesheet Journal\'.'))
         if vals.get('attendances_ids'):
             # If attendances, we sort them by date asc before writing them, to satisfy the alternance constraint
             # In addition to the date order, deleting attendances are done before inserting attendances
@@ -169,7 +165,7 @@ class hr_timesheet_sheet(osv.osv):
             return (datetime.today() + relativedelta(weekday=0, days=-6)).strftime('%Y-%m-%d')
         elif r=='year':
             return time.strftime('%Y-01-01')
-        return time.strftime('%Y-%m-%d')
+        return fields.date.context_today(self, cr, uid, context)
 
     def _default_date_to(self, cr, uid, context=None):
         user = self.pool.get('res.users').browse(cr, uid, uid, context=context)
@@ -180,7 +176,7 @@ class hr_timesheet_sheet(osv.osv):
             return (datetime.today() + relativedelta(weekday=6)).strftime('%Y-%m-%d')
         elif r=='year':
             return time.strftime('%Y-12-31')
-        return time.strftime('%Y-%m-%d')
+        return fields.date.context_today(self, cr, uid, context)
 
     def _default_employee(self, cr, uid, context=None):
         emp_ids = self.pool.get('hr.employee').search(cr, uid, [('user_id','=',uid)], context=context)
@@ -222,7 +218,8 @@ class hr_timesheet_sheet(osv.osv):
             return []
         if isinstance(ids, (long, int)):
             ids = [ids]
-        return [(r['id'], _('Week ')+datetime.strptime(r['date_from'], '%Y-%m-%d').strftime('%U')) \
+        # week number according to ISO 8601 Calendar
+        return [(r['id'], _('Week ')+str(datetime.strptime(r['date_from'], '%Y-%m-%d').isocalendar()[1])) \
                 for r in self.read(cr, uid, ids, ['date_from'],
                     context=context, load='_classic_write')]
 
@@ -347,9 +344,6 @@ class account_analytic_line(osv.osv):
                 raise UserError(_('You cannot modify an entry in a confirmed timesheet.'))
         return True
 
-    def multi_on_change_account_id(self, cr, uid, ids, account_ids, context=None):
-        return dict([(account_id, self.on_change_account_id(cr, uid, ids, account_id, user_id=context.get('user_id', uid), unit_amount=0, is_timesheet=True, context=context)) for account_id in account_ids])
-
 
 class hr_attendance(osv.osv):
     _inherit = "hr.attendance"
@@ -371,8 +365,12 @@ class hr_attendance(osv.osv):
                                INNER JOIN resource_resource r
                                        ON (e.resource_id = r.id)
                             ON (a.employee_id = e.id)
-                        WHERE %(date_to)s >= date_trunc('day', a.name)
-                              AND %(date_from)s <= a.name
+                         LEFT JOIN res_users u
+                         ON r.user_id = u.id
+                         LEFT JOIN res_partner p
+                         ON u.partner_id = p.id
+                         WHERE %(date_to)s >= date_trunc('day', a.name AT TIME ZONE 'UTC' AT TIME ZONE coalesce(p.tz, 'UTC'))
+                              AND %(date_from)s <= date_trunc('day', a.name AT TIME ZONE 'UTC' AT TIME ZONE coalesce(p.tz, 'UTC'))
                               AND %(user_id)s = r.user_id
                          GROUP BY a.id""", {'date_from': ts.date_from,
                                             'date_to': ts.date_to,
@@ -587,11 +585,10 @@ class hr_timesheet_sheet_sheet_account(osv.osv):
         'name': fields.many2one('account.analytic.account', 'Project / Analytic Account', readonly=True),
         'sheet_id': fields.many2one('hr_timesheet_sheet.sheet', 'Sheet', readonly=True),
         'total': fields.float('Total Time', digits=(16,2), readonly=True),
-        'invoice_rate': fields.many2one('hr_timesheet_invoice.factor', 'Invoice rate', readonly=True),
         }
 
     _depends = {
-        'account.analytic.line': ['account_id', 'date', 'to_invoice', 'unit_amount', 'user_id'],
+        'account.analytic.line': ['account_id', 'date', 'unit_amount', 'user_id'],
         'hr_timesheet_sheet.sheet': ['date_from', 'date_to', 'user_id'],
     }
 
@@ -601,15 +598,14 @@ class hr_timesheet_sheet_sheet_account(osv.osv):
                 min(l.id) as id,
                 l.account_id as name,
                 s.id as sheet_id,
-                sum(l.unit_amount) as total,
-                l.to_invoice as invoice_rate
+                sum(l.unit_amount) as total
             from
                 account_analytic_line l
                     LEFT JOIN hr_timesheet_sheet_sheet s
                         ON (s.date_to >= l.date
                             AND s.date_from <= l.date
                             AND s.user_id = l.user_id)
-            group by l.account_id, s.id, l.to_invoice
+            group by l.account_id, s.id
         )""")
 
 

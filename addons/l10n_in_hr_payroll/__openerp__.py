@@ -3,7 +3,6 @@
 {
     'name': 'Indian Payroll',
     'category': 'Localization',
-    'author': 'OpenERP SA',
     'website':'http://www.openerp.com',
     'depends': ['hr_payroll'],
     'version': '1.0',
@@ -46,5 +45,5 @@ Indian Payroll Salary Rules.
     ],
 
     'demo': ['l10n_in_hr_payroll_demo.xml'],
-    'installable': False
+    'installable': True
 }

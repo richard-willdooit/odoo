@@ -1,10 +1,8 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 {
-    'name' : 'Products Expiry Date',
+    'name' : 'Products Expiration Date',
     'version' : '1.0',
-    'author' : 'OpenERP SA',
     'category' : 'Specific Industry Applications',
-    'website': 'https://www.odoo.com',
     'depends' : ['stock'],
     'demo' : ['product_expiry_demo.xml'],
     'description': """

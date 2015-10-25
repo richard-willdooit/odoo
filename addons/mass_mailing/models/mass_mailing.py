@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 
 from datetime import datetime
-from dateutil import relativedelta
 import random
 
+from openerp import _
 from openerp import tools
-from openerp import models, api, _
 from openerp import SUPERUSER_ID
 from openerp.exceptions import UserError
 from openerp.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from openerp.tools.safe_eval import safe_eval as eval
-from openerp.tools import ustr
 from openerp.osv import osv, fields
 
 
@@ -22,6 +20,7 @@ class MassMailingTag(osv.Model):
 
     _columns = {
         'name': fields.char('Name', required=True),
+        'color': fields.integer('Color Index'),
     }
     _sql_constraints = [
             ('name_uniq', 'unique (name)', "Tag name already exists !"),
@@ -42,6 +41,7 @@ class MassMailingList(osv.Model):
 
     _columns = {
         'name': fields.char('Mailing List', required=True),
+        'active': fields.boolean('Active'),
         'create_date': fields.datetime('Creation Date'),
         'contact_nbr': fields.function(
             _get_contact_nbr, type='integer',
@@ -52,8 +52,8 @@ class MassMailingList(osv.Model):
     }
 
     def _get_default_popup_content(self, cr, uid, context=None):
-        return """<div class="o_popup_modal_header text-center">
-    <h3 class="o_popup_modal_title mt8">Odoo Presents</h3>
+        return """<div class="modal-header text-center">
+    <h3 class="modal-title mt8">Odoo Presents</h3>
 </div>
 <div class="o_popup_message">
     <font>7</font>
@@ -63,7 +63,9 @@ class MassMailingList(osv.Model):
 <p class="o_message_paragraph">Join our Marketing newsletter and get <strong>this white paper instantly</strong></p>"""
 
     _defaults = {
+        'active': True,
         'popup_content': _get_default_popup_content,
+        'popup_redirect_url': '/',
     }
 
 
@@ -449,7 +451,7 @@ class MassMailing(osv.Model):
         return res
     def _get_next_departure(self, cr, uid, ids, name, arg, context=None):
         mass_mailings = self.browse(cr, uid, ids, context=context)
-        cron_next_call = self.pool.get('ir.model.data').xmlid_to_object(cr, uid, 'mass_mailing.ir_cron_mass_mailing_queue', context=context).nextcall
+        cron_next_call = self.pool.get('ir.model.data').xmlid_to_object(cr, SUPERUSER_ID, 'mass_mailing.ir_cron_mass_mailing_queue', context=context).nextcall
 
         result = {}
         for mass_mailing in mass_mailings:
@@ -477,6 +479,7 @@ class MassMailing(osv.Model):
 
     _columns = {
         'name': fields.char('Subject', required=True),
+        'active': fields.boolean('Active'),
         'email_from': fields.char('From', required=True),
         'create_date': fields.datetime('Creation Date'),
         'sent_date': fields.datetime('Sent Date', oldname='date', copy=False),
@@ -599,11 +602,13 @@ class MassMailing(osv.Model):
         return res
 
     _defaults = {
+        'active': True,
         'state': 'draft',
         'email_from': lambda self, cr, uid, ctx=None: self.pool['mail.message']._get_default_from(cr, uid, context=ctx),
         'reply_to': lambda self, cr, uid, ctx=None: self.pool['mail.message']._get_default_from(cr, uid, context=ctx),
         'mailing_model': 'mail.mass_mailing.contact',
         'contact_ab_pc': 100,
+        'mailing_domain': [],
     }
 
     def onchange_mass_mailing_campaign_id(self, cr, uid, id, mass_mailing_campaign_ids, context=None):
@@ -679,7 +684,7 @@ class MassMailing(osv.Model):
             else:
                 value['mailing_domain'] = "[('list_id', '=', False)]"
         else:
-            value['mailing_domain'] = False
+            value['mailing_domain'] = []
         value['body_html'] = "on_change_model_and_list"
         return {'value': value}
 

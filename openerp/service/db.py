@@ -31,10 +31,9 @@ class DatabaseExists(Warning):
 #----------------------------------------------------------
 
 def check_super(passwd):
-    if passwd == openerp.tools.config['admin_passwd']:
+    if passwd and passwd == openerp.tools.config['admin_passwd']:
         return True
-    else:
-        raise openerp.exceptions.AccessDenied()
+    raise openerp.exceptions.AccessDenied()
 
 # This should be moved to openerp.modules.db, along side initialize().
 def _initialize_db(id, db_name, demo, lang, user_password):
@@ -300,10 +299,10 @@ def exp_db_exist(db_name):
     return bool(openerp.sql_db.db_connect(db_name))
 
 def list_dbs(force=False):
-    if not openerp.tools.config['list_db'] and not document:
+    if not openerp.tools.config['list_db'] and not force:
         raise openerp.exceptions.AccessDenied()
     chosen_template = openerp.tools.config['db_template']
-    templates_list = tuple(set(['template0', 'template1', 'postgres', chosen_template]))
+    templates_list = tuple(set(['postgres', chosen_template]))
     db = openerp.sql_db.db_connect('postgres')
     with closing(db.cursor()) as cr:
         try:
@@ -316,9 +315,9 @@ def list_dbs(force=False):
                 res = cr.fetchone()
                 db_user = res and str(res[0])
             if db_user:
-                cr.execute("select datname from pg_database where datdba=(select usesysid from pg_user where usename=%s) and datname not in %s order by datname", (db_user, templates_list))
+                cr.execute("select datname from pg_database where datdba=(select usesysid from pg_user where usename=%s) and not datistemplate and datallowconn and datname not in %s order by datname", (db_user, templates_list))
             else:
-                cr.execute("select datname from pg_database where datname not in %s order by datname", (templates_list,))
+                cr.execute("select datname from pg_database where not datistemplate and datallowconn and datname not in %s order by datname", (templates_list,))
             res = [openerp.tools.ustr(name) for (name,) in cr.fetchall()]
         except Exception:
             res = []

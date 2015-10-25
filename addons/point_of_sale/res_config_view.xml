@@ -5,32 +5,27 @@
             <field name="name">pos.config.settings.form</field>
             <field name="model">pos.config.settings</field>
             <field name="arch" type="xml">
-                <form string="Configure Point of Sale" class="oe_form_configuration">
+                <form class="oe_form_configuration">
                     <header>
                         <button string="Apply" type="object" name="execute" class="oe_highlight"/>
-                        or
                         <button string="Cancel" type="object" name="cancel" class="oe_link"/>
                     </header>
-                    <separator string="Point of Sale"/>
-                    <group>
-                        <label for="module_pos_restaurant"/>
-                        <div>
-                            <field name="module_pos_restaurant" widget="radio"/>
-                        </div>
-
+                    <group string="Point of Sale">
+                        <field name="module_pos_restaurant" widget="radio"/>
+                        <field name="module_pos_discount" widget="radio"/>
+                        <field name="module_pos_mercury" widget="radio"/>
+                        <field name="module_pos_reprint" widget="radio"/>
                         <label for="module_pos_loyalty"/>
                         <div>
-                            <field name="module_pos_loyalty" widget="radio"/>
-                        </div>
-
-                        <label for="module_pos_discount"/>
-                        <div>
-                            <field name="module_pos_discount" widget="radio"/>
+                              <div>
+                                  <field name="module_pos_loyalty" widget="upgrade_boolean"/>
+                                  <label for="module_pos_loyalty" string="Manage loyalty program with points and rewards for customers"/>
+                              </div>
                         </div>
                     </group>
                 </form>
-			</field>
-		</record>            	
+            </field>
+        </record>
         <record id="action_pos_configuration" model="ir.actions.act_window">
             <field name="name">Configure Point of Sale</field>
             <field name="res_model">pos.config.settings</field>

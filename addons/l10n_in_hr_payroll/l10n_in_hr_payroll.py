@@ -135,7 +135,7 @@ class payroll_advice(osv.osv):
         if company_id:
             company = self.pool.get('res.company').browse(cr, uid, [company_id], context=context)[0]
             if company.partner_id.bank_ids:
-                res.update({'bank_id': company.partner_id.bank_ids[0].bank.id})
+                res.update({'bank_id': company.partner_id.bank_ids[0].bank_id.id})
         return {
             'value':res
         }
@@ -169,7 +169,7 @@ class hr_payslip_run(osv.osv):
                         'company_id': users[0].company_id.id,
                         'name': run.name,
                         'date': run.date_end,
-                        'bank_id': users[0].company_id.bank_ids and users[0].company_id.bank_ids[0].id or False
+                        'bank_id': users[0].company_id.partner_id.bank_ids and users[0].company_id.partner_id.bank_ids[0].id or False
                     }
             advice_id = advice_pool.create(cr, uid, advice_data, context=context)
             slip_ids = []

@@ -15,7 +15,6 @@
 Allow cashier to reprint receipts
 
 """,
-    'author': 'Odoo SA',
     'depends': ['point_of_sale'],
     'data': [
         'views/templates.xml',
@@ -28,5 +27,3 @@ Allow cashier to reprint receipts
     'website': 'https://www.odoo.com/page/point-of-sale',
     'auto_install': False,
 }
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

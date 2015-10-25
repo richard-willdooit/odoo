@@ -55,6 +55,9 @@ var WidgetButton = common.FormWidget.extend({
         this.execute_action().always(function() {
             self.force_disabled = false;
             self.check_disable();
+            if (self.$el.hasClass('o_wow')) {
+                self.show_wow();
+            }
         });
     },
     execute_action: function() {
@@ -91,6 +94,19 @@ var WidgetButton = common.FormWidget.extend({
         var disabled = (this.force_disabled || !this.view.is_interactible_record());
         this.$el.prop('disabled', disabled);
         this.$el.css('color', disabled ? 'grey' : '');
+    },
+    show_wow: function() {
+        var class_to_add = 'o_wow_thumbs';
+        if (Math.random() > 0.9) {
+            var other_classes = ['o_wow_peace', 'o_wow_heart'];
+            class_to_add = other_classes[Math.floor(Math.random()*other_classes.length)];
+        }
+
+        var $body = $('body');
+        $body.addClass(class_to_add);
+        setTimeout(function() {
+            $body.removeClass(class_to_add);
+        }, 1000);
     }
 });
 
@@ -165,6 +181,7 @@ var FieldChar = common.AbstractField.extend(common.ReinitializeFieldMixin, {
 });
 
 var KanbanSelection = FieldChar.extend({
+    template: "FormSelection",
     init: function (field_manager, node) {
         this._super(field_manager, node);
     },
@@ -180,54 +197,58 @@ var KanbanSelection = FieldChar.extend({
     prepare_dropdown_selection: function() {
         var self = this;
         var _data = [];
-        var fetch_stage;
-        var selection = this.field.selection || [];
-        var stage_id = _.isArray(this.view.datarecord.stage_id) ? this.view.datarecord.stage_id[0] : this.view.datarecord.stage_id;
-        var legend_field = this.options && this.options.states_legend_field || false;
-        var fields_to_read = _.map(
-            this.options && this.options.states_legend || {},
-            function (value, key, list) { return value; });
-        if (legend_field && fields_to_read && stage_id) {
-            fetch_stage = new data.DataSet(
-                this,
-                self.view.fields[legend_field].field.relation).read_ids([stage_id],
-                fields_to_read);
-        }
-        else { fetch_stage = $.Deferred().resolve(false); }
-        return $.when(fetch_stage).then(function (stage_data) {
-            _.map(selection, function(res) {
-                var value = {
-                    'name': res[0],
-                    'tooltip': res[1],
-                    'state_name': res[1],
-                };
-                if (stage_data && stage_data[0][self.options.states_legend[res[0]]]) {
-                    value['state_name'] = stage_data[0][self.options.states_legend[res[0]]];
-                    value['tooltip'] = stage_data[0][self.options.states_legend[res[0]]];
-                }
-                if (res[0] == 'normal') { value['state_class'] = 'oe_kanban_status'; }
-                else if (res[0] == 'done') { value['state_class'] = 'oe_kanban_status oe_kanban_status_green'; }
-                else { value['state_class'] = 'oe_kanban_status oe_kanban_status_red'; }
-                _data.push(value);
-            });
-            return _data;
+        var current_stage_id = self.view.datarecord.stage_id[0];
+        var stage_data = {
+            id: current_stage_id,
+            legend_normal: self.view.datarecord.legend_normal || undefined,
+            legend_blocked : self.view.datarecord.legend_blocked || undefined,
+            legend_done: self.view.datarecord.legend_done || undefined,
+        };
+        _.map(self.field.selection || [], function(selection_item) {
+            var value = {
+                'name': selection_item[0],
+                'tooltip': selection_item[1],
+            };
+            if (selection_item[0] === 'normal') {
+                value.state_name = stage_data.legend_normal ? stage_data.legend_normal : selection_item[1];
+            } else if (selection_item[0] === 'done') {
+                value.state_class = 'oe_kanban_status_green';
+                value.state_name = stage_data.legend_done ? stage_data.legend_done : selection_item[1];
+            } else {
+                value.state_class = 'oe_kanban_status_red';
+                value.state_name = stage_data.legend_blocked ? stage_data.legend_blocked : selection_item[1];
+            }
+            _data.push(value);
         });
+        return _data;
     },
     render_value: function() {
+        this._super();
+        this.states = this.prepare_dropdown_selection();
         var self = this;
-        var dd_fetched = this.prepare_dropdown_selection();
-        return $.when(dd_fetched).then(function (states) {
-            self.states = states;
-            self.$el.addClass('oe_right');
-            self.$el.html(QWeb.render("KanbanSelection", {'widget': self}));
-            self.$el.find('li').on('click', self.set_kanban_selection.bind(self));
+        // Adapt "FormSelection"
+        var current_state = _.find(this.states, function(state) {
+            return state.name === self.get('value');
         });
+        this.$('.oe_kanban_status')
+            .removeClass('oe_kanban_status_red oe_kanban_status_green')
+            .addClass(current_state.state_class);
+
+        // Render "FormSelection.Items" and move it into "FormSelection"
+        var $items = $(QWeb.render('FormSelection.items', {
+            states: _.without(this.states, current_state)
+        }));
+        var $dropdown = this.$el.find('.dropdown-menu');
+        $dropdown.children().remove(); // remove old items
+        $items.appendTo($dropdown);
+        this.$el.find('a').on('click', this.set_kanban_selection.bind(this));
     },
     /* setting the value: in view mode, perform an asynchronous call and reload
     the form view; in edit mode, use set_value to save the new value that will
     be written when saving the record. */
     set_kanban_selection: function (ev) {
         var self = this;
+        ev.preventDefault();
         var li = $(ev.target).closest('li');
         if (li.length) {
             var value = String(li.data('value'));
@@ -485,7 +506,7 @@ var FieldDatetime = common.AbstractField.extend(common.ReinitializeFieldMixin, {
     },
     is_syntax_valid: function() {
         if (!this.get("effective_readonly") && this.datewidget) {
-            return this.datewidget.is_valid_();
+            return this.datewidget.is_valid();
         }
         return true;
     },
@@ -627,6 +648,43 @@ var FieldBoolean = common.AbstractField.extend({
             $(this).closest("span").append($('<div class="boolean"></div>'));
         });
     }
+});
+
+/**
+    This widget is intended to be used on stat button boolean fields.
+    It is a read-only field that will display a simple string "<label of value>".
+*/
+var FieldBooleanButton = common.AbstractField.extend({
+    className: 'o_stat_info',
+    init: function() {
+        this._super.apply(this, arguments);
+        switch (this.options["terminology"]) {
+            case "active":
+                this.string_true = _t("Active");
+                this.hover_true = _t("Deactivate");
+                this.string_false = _t("Inactive");
+                this.hover_false = _t("Activate");
+                break;
+            case "archive":
+                this.string_true = _t("Not Archived");
+                this.hover_true = _t("Archive");
+                this.string_false = _t("Archived");
+                this.hover_false = _t("Unarchive");
+                break;
+            default:
+                this.string_true = _t("On");
+                this.hover_true = _t("Switch Off");
+                this.string_false = _t("Off");
+                this.hover_false = _t("Switch On");
+        }
+    },
+    render_value: function() {
+        this._super();
+        this.$el.html(QWeb.render("BooleanButton", {widget: this}));
+    },
+    is_false: function() {
+        return false;
+    },
 });
 
 /**
@@ -983,7 +1041,7 @@ var FieldRadio = common.AbstractField.extend(common.ReinitializeFieldMixin, {
     },
     get_value: function () {
         var value = this.get('value');
-        return value instanceof Array ? value[0] : value;
+        return ((value instanceof Array)? value[0] : value) || false;
     },
     render_value: function () {
         var self = this;
@@ -1097,11 +1155,11 @@ var FieldBinary = common.AbstractField.extend(common.ReinitializeFieldMixin, {
     },
     initialize_content: function() {
         var self= this;
-        this.$el.find('input.oe_form_binary_file').change(this.on_file_change);
-        this.$el.find('button.oe_form_binary_file_save').click(this.on_save_as);
-        this.$el.find('.oe_form_binary_file_clear').click(this.on_clear);
-        this.$el.find('.oe_form_binary_file_edit').click(function(event){
-            self.$el.find('input.oe_form_binary_file').click();
+        this.$('input.o_form_input_file').change(this.on_file_change);
+        this.$('button.oe_form_binary_file_save').click(this.on_save_as);
+        this.$('.oe_form_binary_file_clear').click(this.on_clear);
+        this.$('.oe_form_binary_file_edit').click(function() {
+            self.$('input.o_form_input_file').click();
         });
     },
     on_file_change: function(e) {
@@ -1123,8 +1181,8 @@ var FieldBinary = common.AbstractField.extend(common.ReinitializeFieldMixin, {
                     self.on_file_uploaded(file.size, file.name, file.type, data);
                 };
             } else {
-                this.$el.find('form.oe_form_binary_form input[name=session_id]').val(this.session.session_id);
-                this.$el.find('form.oe_form_binary_form').submit();
+                this.$el.find('form.o_form_binary_form input[name=session_id]').val(this.session.session_id);
+                this.$el.find('form.o_form_binary_form').submit();
             }
             this.$el.find('.oe_form_binary_progress').show();
             this.$el.find('.oe_form_binary').hide();
@@ -1155,18 +1213,18 @@ var FieldBinary = common.AbstractField.extend(common.ReinitializeFieldMixin, {
             var filename_fieldname = this.node.attrs.filename;
             var filename_field = this.view.fields && this.view.fields[filename_fieldname];
             this.session.get_file({
-                url: '/web/binary/saveas_ajax',
-                data: {data: JSON.stringify({
-                    model: this.view.dataset.model,
-                    id: (this.view.datarecord.id || ''),
-                    field: this.name,
-                    filename_field: (filename_fieldname || ''),
-                    data: utils.is_bin_size(value) ? null : value,
-                    filename: filename_field ? filename_field.get('value') : null,
-                    context: this.view.dataset.get_context()
-                })},
-                complete: framework.unblockUI,
-                error: c.rpc_error.bind(c)
+                'url': '/web/content',
+                'data': {
+                    'model': this.view.dataset.model,
+                    'id': this.view.datarecord.id,
+                    'field': this.name,
+                    'filename_field': filename_fieldname,
+                    'filename': filename_field ? filename_field.get('value') : null,
+                    'download': true,
+                    'data': utils.is_bin_size(value) ? null : value,
+                },
+                'complete': framework.unblockUI,
+                'error': c.rpc_error.bind(c)
             });
             ev.stopPropagation();
             return false;
@@ -1263,11 +1321,11 @@ var FieldBinaryImage = FieldBinary.extend({
             var field = this.name;
             if (this.options.preview_image)
                 field = this.options.preview_image;
-            url = session.url('/web/binary/image', {
+            url = session.url('/web/image', {
                                         model: this.view.dataset.model,
                                         id: id,
                                         field: field,
-                                        t: (new Date().getTime()),
+                                        unique: (this.view.datarecord.__last_update || '').replace(/[^0-9]/g, ''),
             });
         } else {
             url = this.placeholder;
@@ -1577,6 +1635,104 @@ var FieldToggleBoolean = common.AbstractField.extend({
     },
 });
 
+/**
+    This widget is intended to be used in config settings.
+    When checked, an upgrade popup is showed to the user.
+*/
+
+var AbstractFieldUpgrade = {
+    events: {
+        'click input': 'on_click_input',
+    },
+    
+    start: function() {
+        this._super.apply(this, arguments);
+        
+        this.get_enterprise_label().after($("<span>", {
+            text: "Enterprise",
+            'class': "label label-primary oe_inline"
+        }));
+    },
+    
+    open_dialog: function() {
+        var message = _t('Upgrade to <a href="https://www.odoo.com/editions">Odoo Enterprise</a> to activate this feature.');
+        var buttons = [
+            {
+                text: _t("Upgrade now"),
+                classes: 'btn-primary',
+                close: true,
+                click: this.confirm_upgrade,
+            },
+            {
+                text: _t("Cancel"),
+                close: true,
+            },
+        ];
+        
+        return new Dialog(this, {
+            size: 'medium',
+            buttons: buttons,
+            $content: $('<div>', {
+                html: message,
+            }),
+            title: _t("Odoo Enterprise"),
+        }).open();
+    },
+  
+    confirm_upgrade: function() {
+        new Model("res.users").call("read", [session.uid, ["partner_id"]]).done(function(data) {
+            if(data.partner_id) {
+                new Model("res.partner").call("read", [data.partner_id[0], ["name", "lang", "country_id", "email", "phone"]]).done(function(data) {
+                    // Remove false value
+                    data.country_id = data.country_id[0];
+                    var sanitized_data = _.omit(data, function(value, key, object) {
+                        if (_.isUndefined(value) || ( (_.isBoolean(value)) && (value === false) ) || key === "id") {
+                            return true;
+                        }
+                    });
+                    // prepare to url (+urlencode)
+                    var url_args = $.param(sanitized_data);
+                    framework.redirect("https://www.odoo.com/odoo-enterprise/upgrade?" + url_args);
+                });
+            }
+        });
+    },
+    
+    get_enterprise_label: function() {},
+    on_click_input: function() {},
+};
+
+var UpgradeBoolean = FieldBoolean.extend(AbstractFieldUpgrade, {
+    template: "FieldUpgradeBoolean",
+    
+    get_enterprise_label: function() {
+        return this.$label;
+    },
+
+    on_click_input: function(event) {
+        if(this.$checkbox.prop("checked")) {
+            this.open_dialog().on('closed', this, function() {
+                this.$checkbox.prop("checked", false);
+            });
+        }
+    },
+});
+
+var UpgradeRadio = FieldRadio.extend(AbstractFieldUpgrade, {
+  
+    get_enterprise_label: function() {
+        return this.$('label').last();
+    },
+    
+    on_click_input: function(event) {
+        if($(event.target).val() == 1) {
+            this.open_dialog().on('closed', this, function() {
+                this.$('input').first().prop("checked", true);
+            });
+        }
+    },
+});
+
 
 /**
  * Registry of form fields, called by :js:`instance.web.FormView`.
@@ -1597,6 +1753,7 @@ core.form_widget_registry
     .add('radio', FieldRadio)
     .add('reference', FieldReference)
     .add('boolean', FieldBoolean)
+    .add('boolean_button', FieldBooleanButton)
     .add('toggle_button', FieldToggleBoolean)
     .add('float', FieldFloat)
     .add('percentpie', FieldPercentPie)
@@ -1612,7 +1769,9 @@ core.form_widget_registry
     .add('kanban_state_selection', KanbanSelection)
     .add('statinfo', StatInfo)
     .add('timezone_mismatch', TimezoneMismatch)
-    .add('label_selection', LabelSelection);
+    .add('label_selection', LabelSelection)
+    .add('upgrade_boolean', UpgradeBoolean)
+    .add('upgrade_radio', UpgradeRadio);
 
 
 /**
@@ -1625,7 +1784,9 @@ core.form_tag_registry.add('button', WidgetButton);
 
 return {
     FieldChar: FieldChar,
-    FieldMonetary: FieldMonetary
+    FieldFloat: FieldFloat,
+    FieldMonetary: FieldMonetary,
+    WidgetButton: WidgetButton
 };
 
 });

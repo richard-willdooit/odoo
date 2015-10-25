@@ -140,12 +140,10 @@ def encode(s):
 
 # which elements are translated inline
 TRANSLATED_ELEMENTS = {
-    'abbr', 'audio', 'b', 'bdi', 'bdo', 'br', 'canvas', 'cite', 'code',
-    'data', 'datalist', 'del', 'dfn', 'em', 'embed', 'font', 'i', 'iframe',
-    'ins', 'kbd', 'keygen', 'map', 'mark', 'math', 'meter', 'object', 'output',
-    'progress', 'q', 'ruby', 's', 'samp', 'select', 'small', 'span', 'strong',
-    'sub', 'sup', 'svg', 'template', 'textarea', 'time', 'u', 'var', 'video',
-    'wbr', 'text',
+    'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'del', 'dfn', 'em',
+    'font', 'i', 'ins', 'kbd', 'keygen', 'mark', 'math', 'meter', 'output',
+    'progress', 'q', 'ruby', 's', 'samp', 'small', 'span', 'strong', 'sub',
+    'sup', 'time', 'u', 'var', 'wbr', 'text',
 }
 
 # which attributes must be translated
@@ -271,7 +269,7 @@ def xml_translate(callback, value):
         return trans.get_done()
     except etree.ParseError:
         wrapped = "<div>%s</div>" % encode(value)
-        root = etree.fromstring(wrapped, etree.HTMLParser())
+        root = etree.fromstring(wrapped, etree.HTMLParser(encoding='utf-8'))
         # html > body > div
         trans.process(root[0][0])
         return trans.get_done()[5:-6]
@@ -767,7 +765,18 @@ def trans_generate(lang, modules, cr):
     def push_translation(module, type, name, id, source, comments=None):
         # empty and one-letter terms are ignored, they probably are not meant to be
         # translated, and would be very hard to translate anyway.
-        if not source or len(source.strip()) <= 1:
+        sanitized_term = (source or '').strip()
+        try:
+            # verify the minimal size without eventual xml tags
+            # wrap to make sure html content like '<a>b</a><c>d</c>' is accepted by lxml
+            wrapped = "<div>%s</div>" % sanitized_term
+            node = etree.fromstring(wrapped)
+            sanitized_term = etree.tostring(node, encoding='UTF-8', method='text')
+        except etree.ParseError:
+            pass
+        # remove non-alphanumeric chars
+        sanitized_term = re.sub(r'\W+', '', sanitized_term)
+        if not sanitized_term or len(sanitized_term) <= 1:
             return
 
         tnx = (module, source, name, id, type, tuple(comments or ()))
@@ -890,16 +899,19 @@ def trans_generate(lang, modules, cr):
         lambda m: m['name'],
         registry['ir.module.module'].search_read(cr, uid, [('state', '=', 'installed')], fields=['name']))
 
-    path_list = list(openerp.modules.module.ad_paths)
+    path_list = [(path, True) for path in openerp.modules.module.ad_paths]
     # Also scan these non-addon paths
-    for bin_path in ['osv', 'report' ]:
-        path_list.append(os.path.join(config.config['root_path'], bin_path))
+    for bin_path in ['osv', 'report', 'modules', 'service', 'tools']:
+        path_list.append((os.path.join(config.config['root_path'], bin_path), True))
 
+    # non-recursive scan for individual files in root directory but without
+    # scanning subdirectories that may contain addons
+    path_list.append((config.config['root_path'], False))
     _logger.debug("Scanning modules at paths: %s", path_list)
 
     def get_module_from_path(path):
-        for mp in path_list:
-            if path.startswith(mp) and os.path.dirname(path) != mp:
+        for (mp, rec) in path_list:
+            if rec and path.startswith(mp) and os.path.dirname(path) != mp:
                 path = path[len(mp)+1:]
                 return path.split(os.path.sep)[0]
         return 'base' # files that are not in a module are considered as being in 'base' module
@@ -934,7 +946,7 @@ def trans_generate(lang, modules, cr):
         finally:
             src_file.close()
 
-    for path in path_list:
+    for (path, recursive) in path_list:
         _logger.debug("Scanning files of modules at %s", path)
         for root, dummy, files in osutil.walksymlinks(path):
             for fname in fnmatch.filter(files, '*.py'):
@@ -953,6 +965,9 @@ def trans_generate(lang, modules, cr):
                 for fname in fnmatch.filter(files, '*.xml'):
                     babel_extract_terms(fname, path, root, 'openerp.tools.translate:babel_extract_qweb',
                                         extra_comments=[WEB_TRANSLATION_COMMENT])
+            if not recursive:
+                # due to topdown, first iteration is in first level
+                break
 
     out = []
     # translate strings marked as to be translated
@@ -1017,7 +1032,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
                     # and we try to find the corresponding
                     # /path/to/xxx/i18n/xxx.pot file.
                     # (Sometimes we have 'i18n_extra' instead of just 'i18n')
-                    addons_module_i18n, _ = os.path.split(fileobj.name)
+                    addons_module_i18n, _ignored = os.path.split(fileobj.name)
                     addons_module, i18n_dir = os.path.split(addons_module_i18n)
                     addons, module = os.path.split(addons_module)
                     pot_handle = misc.file_open(os.path.join(
@@ -1028,7 +1043,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
 
         else:
             _logger.info('Bad file format: %s', fileformat)
-            raise Exception(_('Bad file format'))
+            raise Exception(_('Bad file format: %s') % fileformat)
 
         # Read the POT references, and keep them indexed by source string.
         class Target(object):
@@ -1038,7 +1053,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
                 self.comments = None
 
         pot_targets = defaultdict(Target)
-        for type, name, res_id, src, _, comments in pot_reader:
+        for type, name, res_id, src, _ignored, comments in pot_reader:
             if type is not None:
                 target = pot_targets[src]
                 target.targets.add((type, name, res_id))
@@ -1072,7 +1087,8 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
             if isinstance(res_id, (int, long)) or \
                     (isinstance(res_id, basestring) and res_id.isdigit()):
                 dic['res_id'] = int(res_id)
-                dic['module'] = module_name
+                if module_name:
+                    dic['module'] = module_name
             else:
                 # res_id is an xml id
                 dic['res_id'] = None
@@ -1080,7 +1096,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
                 if '.' in res_id:
                     dic['module'], dic['imd_name'] = res_id.split('.', 1)
                 else:
-                    dic['module'], dic['imd_name'] = False, res_id
+                    dic['module'], dic['imd_name'] = module_name, res_id
 
             irt_cursor.push(dic)
 

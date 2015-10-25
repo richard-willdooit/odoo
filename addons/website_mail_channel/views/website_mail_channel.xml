@@ -54,7 +54,30 @@
                     <i class='fa fa-fw fa-envelope-o'/> <t t-raw="group_data[group.id]['monthly_message_nbr']"/> messages / month
                 </div>
                 <div class="col-md-3">
-                    <t t-call="website_mail.follow"><t t-set="object" t-value="group"/></t>
+                    <!--<t t-call="website_mail.follow"><t t-set="object" t-value="group"/></t>-->
+
+                    <div class="js_follow_alias"
+                              t-att-data-id="group.id"
+                              data-object="mail.channel"
+                              data-follow="off">
+                        <div class="input-group js_mg_follow_form">
+                            <input
+                                  type="email"
+                                  name="email"
+                                  class="js_follow_email form-control"
+                                  placeholder="your email..."/>
+                            <span class="input-group-btn">
+                                <button href="#" class="btn btn-primary js_follow_btn">Subscribe</button>
+                            </span>
+                        </div>
+                        <p class="js_mg_details hidden well well-sm">
+                            <span class="js_mg_email hidden"><i class="fa fa-envelope-o"/><a href="#" class="js_mg_email"> send mail</a> - </span>
+                            <i class="fa fa-file-o"/><a href="#" class="js_mg_link"> archives</a> -
+                            <i class="fa fa-times"/><a href="#" class="js_unfollow_btn"> unsubscribe</a>
+                        </p>
+                    </div>
+
+
                 </div>
             </div>
         </div>
@@ -205,17 +228,8 @@
                                 </p>
                                 <div class="o_mg_link_content">
                                     <div class="col-md-2 col-sm-3 text-center" t-foreach='message.attachment_ids' t-as='attachment'>
-                                        <a t-att-href="'/mail/download_attachment?model=mail.message&amp;id='+str(message.id)+'&amp;method=download_attachment&amp;attachment_id='+str(attachment.id)" target="_blank">
-                                            <t t-if="attachment.file_type == 'webimage'">
-                                                <img t-att-src="'/web/binary/image?model=ir.attachment&amp;field=datas&amp;id=' + str(attachment.id) + '&amp;resize=100,80'"
-                                                    class='oe_attachment_embedded'
-                                                    t-att-title="attachment.name"/>
-                                            </t>
-                                            <t t-if="attachment.file_type != 'webimage'">
-                                                <img t-att-src="'/mail/static/src/img/mimetypes/' + (attachment.file_type or 'disk') + '.png'"
-                                                    class='oe_attachment_webimage'
-                                                    t-att-title="attachment.name"/>
-                                            </t>
+                                        <a t-attf-href="/web/content/#{attachment.id}?download=true" target="_blank">
+                                            <div class='oe_attachment_embedded o_image' t-att-title="attachment.name" t-att-data-mimetype="attachment.mimetype" t-attf-data-src="/web/image/#{attachment.id}/100x80"/>
                                             <div class='oe_attachment_name'><t t-raw='attachment.name' /></div>
                                         </a>
                                     </div>

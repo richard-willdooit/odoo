@@ -3,7 +3,6 @@
 {
     'name': 'Belgium - Payroll',
     'category': 'Localization',
-    'author': 'OpenERP SA',
     'depends': ['hr_payroll'],
     'version': '1.0',
     'description': """
@@ -29,5 +28,5 @@ Belgian Payroll Rules.
         'l10n_be_hr_payroll_data.xml',
         'data/hr.salary.rule.csv',
     ],
-    'installable': False
+    'installable': True
 }

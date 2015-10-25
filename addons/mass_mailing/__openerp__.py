@@ -10,7 +10,7 @@ marketing campaigns performance to improve conversion rates. Design
 professional emails and reuse templates in a few clicks.
     """,
     'version': '2.0',
-    'author': 'OpenERP',
+    'sequence': 110,
     'website': 'https://www.odoo.com/page/mailing',
     'category': 'Marketing',
     'depends': [
@@ -22,6 +22,7 @@ professional emails and reuse templates in a few clicks.
         'web_kanban_gauge',
     ],
     'data': [
+        'security/mass_mailing_security.xml',
         'data/mail_data.xml',
         'data/mass_mailing_data.xml',
         'wizard/mail_compose_message_view.xml',
@@ -36,14 +37,6 @@ professional emails and reuse templates in a few clicks.
         'views/snippets_themes.xml',
         'views/snippets_themes_options.xml',
         'views/theme_list.xml',
-        'views/theme/neopolitan_snippets.xml',
-        'views/theme/skyline_snippets.xml',
-        'views/theme/narrative_snippets.xml',
-        'views/theme/sunday_snippets.xml',
-        'views/theme/go_snippets.xml',
-        'views/theme/airmail_snippets.xml',
-        'views/theme/zenflat_snippets.xml',
-        'views/theme/cleave_snippets.xml',
     ],
     'qweb': [],
     'demo': [

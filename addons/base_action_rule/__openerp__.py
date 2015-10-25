@@ -15,15 +15,15 @@ Use automated actions to automatically trigger actions for various screens.
 sales team, or an opportunity which still has status pending after 14 days might
 trigger an automatic reminder email.
     """,
-    'author': 'OpenERP SA',
-    'website': 'https://www.odoo.com',
     'depends': ['base', 'resource', 'mail'],
     'data': [
         'base_action_rule_data.xml',
         'base_action_rule_view.xml',
         'security/ir.model.access.csv',
     ],
-    'demo': [],
+    'demo': [
+        'base_action_rule_demo.xml',
+    ],
     'installable': True,
     'auto_install': False,
 }

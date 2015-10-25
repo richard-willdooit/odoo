@@ -47,16 +47,13 @@ var SystrayMenu = Widget.extend({
                 if (!session.debug) {
                     topbar_name = _.str.sprintf("%s (%s)", topbar_name, session.db);
                 }
-                var avatar_src = session.url('/web/binary/image', {model:'res.users', field: 'image_small', id: session.uid});
+                var avatar_src = session.url('/web/image', {model:'res.users', field: 'image_small', id: session.uid});
                 $avatar.attr('src', avatar_src);
 
                 core.bus.trigger('resize');  // Re-trigger the reflow logic
             });
         };
         this.update_promise = this.update_promise.then(fct, fct);
-    },
-    on_menu_help: function() {
-        window.open('http://help.odoo.com', '_blank');
     },
     on_menu_logout: function() {
         this.trigger('user_logout');
@@ -89,22 +86,6 @@ var SystrayMenu = Widget.extend({
                 ev.preventDefault();
                 framework.redirect('https://accounts.odoo.com/account');
             });
-        });
-    },
-    on_menu_about: function() {
-        var self = this;
-        self.rpc("/web/webclient/version_info", {}).done(function(res) {
-            var $help = $(QWeb.render("UserMenu.about", {version_info: res}));
-            $help.find('a.oe_activate_debug_mode').click(function (e) {
-                e.preventDefault();
-                window.location = $.param.querystring( window.location.href, 'debug');
-            });
-            new Dialog(this, {
-                size: 'medium',
-                dialogClass: 'o_act_window',
-                title: _t("About"),
-                $content: $help
-            }).open();
         });
     },
 });

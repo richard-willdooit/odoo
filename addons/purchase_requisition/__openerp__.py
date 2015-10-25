@@ -2,7 +2,6 @@
 {
     'name': 'Purchase Requisitions',
     'version': '0.1',
-    'author': 'OpenERP SA',
     'category': 'Purchase Management',
     'website': 'https://www.odoo.com/page/purchase',
     'description': """
@@ -32,6 +31,9 @@ keep track and order all your purchase orders.
         'test/purchase_requisition_demo.yml',
         'test/cancel_purchase_requisition.yml',
         'test/purchase_requisition.yml',
+    ],
+    'qweb': [
+        'static/src/xml/purchase_requisition.xml',
     ],
     'installable': True,
 }

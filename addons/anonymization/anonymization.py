@@ -428,7 +428,7 @@ class ir_model_fields_anonymize_wizard(osv.osv_memory):
                     self._raise_after_history_update(cr, uid, history_id, 'Error !', msg)
 
                 if anonymized_value is None:
-                    self._raise_after_history_update(cr, uid, history_id, _('Error !'), _("Anonymized value is None. This cannot happens."))
+                    self._raise_after_history_update(cr, uid, history_id, _('Error !'), _("Anonymized value can not be empty."))
 
                 sql = "update %(table)s set %(field)s = %%(anonymized_value)s where id = %%(id)s" % {
                     'table': table_name,
@@ -475,7 +475,10 @@ class ir_model_fields_anonymize_wizard(osv.osv_memory):
         })
 
         # handle the view:
-        view_id = self._id_get(cr, uid, 'ir.ui.view', 'view_ir_model_fields_anonymize_wizard_form', 'anonymization')
+        view_id = self.pool['ir.model.data'].xmlid_to_res_id(
+            cr, uid, 'anonymization.view_ir_model_fields_anonymize_wizard_form',
+            context=context
+        )
 
         return {
                 'res_id': ids[0],
@@ -579,7 +582,11 @@ class ir_model_fields_anonymize_wizard(osv.osv_memory):
             })
 
             # handle the view:
-            view_id = self._id_get(cr, uid, 'ir.ui.view', 'view_ir_model_fields_anonymize_wizard_form', 'anonymization')
+            view_id = self.pool['ir.model.data'].xmlid_to_res_id(
+                cr, uid, 'anonymization.view_ir_model_fields_anonymize_wizard_form',
+                context=context
+            )
+
 
             return {
                     'res_id': ids[0],

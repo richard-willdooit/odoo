@@ -6,9 +6,10 @@ import operator
 import re
 import threading
 
-import openerp.modules
+import openerp
 from openerp.osv import fields, osv
 from openerp import api, tools
+from openerp.http import request
 from openerp.tools.safe_eval import safe_eval as eval
 from openerp.tools.translate import _
 
@@ -23,20 +24,20 @@ class ir_ui_menu(osv.osv):
         self.pool['ir.model.access'].register_cache_clearing_method(self._name, 'clear_caches')
 
     @api.model
-    @tools.ormcache('frozenset(self.env.user.groups_id.ids)')
-    def _visible_menu_ids(self):
+    @tools.ormcache('frozenset(self.env.user.groups_id.ids)', 'debug')
+    def _visible_menu_ids(self, debug=False):
         """ Return the ids of the menu items visible to the user. """
         # retrieve all menus, and determine which ones are visible
         context = {'ir.ui.menu.full_list': True}
         menus = self.with_context(context).search([])
 
+        groups = self.env.user.groups_id if debug else self.env.user.groups_id - self.env.ref('base.group_no_one')
         # first discard all menus with groups the user does not have
-        groups = self.env.user.groups_id
         menus = menus.filtered(
             lambda menu: not menu.groups_id or menu.groups_id & groups)
 
         # take apart menus that have an action
-        action_menus = menus.filtered('action')
+        action_menus = menus.filtered(lambda m: m.action and m.action.exists())
         folder_menus = menus - action_menus
         visible = self.browse()
 
@@ -68,7 +69,7 @@ class ir_ui_menu(osv.osv):
             the menu hierarchy of the current user.
             Uses a cache for speeding up the computation.
         """
-        visible_ids = self._visible_menu_ids()
+        visible_ids = self._visible_menu_ids(request.debug if request else False)
         return self.filtered(lambda menu: menu.id in visible_ids)
 
     def search(self, cr, uid, args, offset=0, limit=None, order=None, context=None, count=False):
@@ -174,25 +175,6 @@ class ir_ui_menu(osv.osv):
                 icon_file.close()
         return icon_image
 
-    def _get_image_icon(self, cr, uid, ids, names, args, context=None):
-        res = {}
-        for menu in self.browse(cr, uid, ids, context=context):
-            res[menu.id] = r = {}
-            for fn in names:
-                fn_src = fn[:-5]    # remove _data
-                r[fn] = self.read_image(menu[fn_src])
-        return res
-
-    def _get_needaction_enabled(self, cr, uid, ids, field_names, args, context=None):
-        """ needaction_enabled: tell whether the menu has a related action
-            that uses the needaction mechanism. """
-        res = dict.fromkeys(ids, False)
-        for menu in self.browse(cr, uid, ids, context=context):
-            if menu.action and menu.action.type in ('ir.actions.act_window', 'ir.actions.client') and menu.action.res_model:
-                if menu.action.res_model in self.pool and self.pool[menu.action.res_model]._needaction:
-                    res[menu.id] = True
-        return res
-
     def get_needaction_data(self, cr, uid, ids, context=None):
         """ Return for each menu entry of ids :
             - if it uses the needaction mechanism (needaction_enabled)
@@ -259,7 +241,7 @@ class ir_ui_menu(osv.osv):
     @api.cr_uid_context
     @tools.ormcache_context('uid', keys=('lang',))
     def load_menus_root(self, cr, uid, context=None):
-        fields = ['name', 'sequence', 'parent_id', 'action']
+        fields = ['name', 'sequence', 'parent_id', 'action', 'web_icon_data']
         menu_root_ids = self.get_user_roots(cr, uid, context=context)
         menu_roots = self.read(cr, uid, menu_root_ids, fields, context=context) if menu_root_ids else []
         return {
@@ -271,8 +253,8 @@ class ir_ui_menu(osv.osv):
         }
 
     @api.cr_uid_context
-    @tools.ormcache_context('uid', keys=('lang',))
-    def load_menus(self, cr, uid, context=None):
+    @tools.ormcache_context('uid', 'debug', keys=('lang',))
+    def load_menus(self, cr, uid, debug, context=None):
         """ Loads all menu items (all applications and their sub-menus).
 
         :return: the menu root
@@ -332,12 +314,6 @@ class ir_ui_menu(osv.osv):
                 "If this field is empty, Odoo will compute visibility based on the related object's read access."),
         'complete_name': fields.function(_get_full_name, string='Full Path', type='char'),
         'web_icon': fields.char('Web Icon File'),
-        'web_icon_data': fields.function(_get_image_icon, string='Web Icon Image', type='binary', readonly=True, store=True, multi='icon'),
-        'needaction_enabled': fields.function(_get_needaction_enabled,
-            type='boolean',
-            store=True,
-            string='Target model uses the need action mechanism',
-            help='If the menu entry action is an act_window action, and if this action is related to a model that uses the need_action mechanism, this field is set to true. Otherwise, it is false.'),
         'action': fields.reference('Action', selection=[
                 ('ir.actions.report.xml', 'ir.actions.report.xml'),
                 ('ir.actions.act_window', 'ir.actions.act_window'),
@@ -347,6 +323,14 @@ class ir_ui_menu(osv.osv):
                 ('ir.actions.client', 'ir.actions.client'),
         ]),
     }
+
+    web_icon_data = openerp.fields.Binary('Web Icon Image',
+        compute="_compute_web_icon", store=True, attachment=True)
+
+    @api.depends('web_icon')
+    def _compute_web_icon(self):
+        for menu in self:
+            menu.web_icon_data = self.read_image(menu.web_icon)
 
     _constraints = [
         (osv.osv._check_recursion, 'Error ! You can not create recursive Menu.', ['parent_id'])

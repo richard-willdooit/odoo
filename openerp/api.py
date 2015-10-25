@@ -365,6 +365,15 @@ def one(method):
             names = recs.method(args)
 
             names = model.method(cr, uid, ids, args, context=context)
+
+        .. deprecated:: 9.0
+
+            :func:`~.one` often makes the code less clear and behaves in ways
+            developers and readers may not expect.
+
+            It is strongly recommended to use :func:`~.multi` and either
+            iterate on the ``self`` recordset or ensure that the recordset
+            is a single record with :meth:`~openerp.models.Model.ensure_one`.
     """
     split = get_context_split(method)
     downgrade = get_downgrade(method)
@@ -652,7 +661,8 @@ class Environment(object):
          - :attr:`uid`, the current user id;
          - :attr:`context`, the current context dictionary.
 
-        It also provides access to the registry, a cache for records, and a data
+        It provides access to the registry by implementing a mapping from model
+        names to new api models. It also holds a cache for records, and a data
         structure to manage recomputations.
     """
     _local = Local()
@@ -703,9 +713,21 @@ class Environment(object):
         envs.add(self)
         return self
 
+    def __contains__(self, model_name):
+        """ Test whether the given model exists. """
+        return model_name in self.registry
+
     def __getitem__(self, model_name):
-        """ return a given model """
+        """ Return an empty recordset from the given model. """
         return self.registry[model_name]._browse(self, ())
+
+    def __iter__(self):
+        """ Return an iterator on model names. """
+        return iter(self.registry)
+
+    def __len__(self):
+        """ Return the size of the model registry. """
+        return len(self.registry)
 
     def __call__(self, cr=None, user=None, context=None):
         """ Return an environment based on ``self`` with modified parameters.
@@ -815,15 +837,13 @@ class Environment(object):
             raise
 
     def field_todo(self, field):
-        """ Check whether ``field`` must be recomputed, and returns a recordset
-            with all records to recompute for ``field``.
-        """
-        if field in self.all.todo:
-            return reduce(operator.or_, self.all.todo[field])
+        """ Return a recordset with all records to recompute for ``field``. """
+        ids = {rid for recs in self.all.todo.get(field, ()) for rid in recs.ids}
+        return self[field.model_name].browse(ids)
 
     def check_todo(self, field, record):
         """ Check whether ``field`` must be recomputed on ``record``, and if so,
-            returns the corresponding recordset to recompute.
+            return the corresponding recordset to recompute.
         """
         for recs in self.all.todo.get(field, []):
             if recs & record:
@@ -832,7 +852,12 @@ class Environment(object):
     def add_todo(self, field, records):
         """ Mark ``field`` to be recomputed on ``records``. """
         recs_list = self.all.todo.setdefault(field, [])
-        recs_list.append(records)
+        for i, recs in enumerate(recs_list):
+            if recs.env == records.env:
+                recs_list[i] |= records
+                break
+        else:
+            recs_list.append(records)
 
     def remove_todo(self, field, records):
         """ Mark ``field`` as recomputed on ``records``. """
@@ -846,9 +871,11 @@ class Environment(object):
         return bool(self.all.todo)
 
     def get_todo(self):
-        """ Return a pair `(field, records)` to recompute. """
-        for field, recs_list in self.all.todo.iteritems():
-            return field, recs_list[0]
+        """ Return a pair ``(field, records)`` to recompute.
+            The field is such that none of its dependencies must be recomputed.
+        """
+        field = min(self.all.todo, key=self.registry.field_sequence)
+        return field, self.all.todo[field][0]
 
     def check_cache(self):
         """ Check the cache consistency. """

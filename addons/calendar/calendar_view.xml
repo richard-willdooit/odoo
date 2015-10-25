@@ -79,11 +79,12 @@
                             <label for="name"/>
                         </div>
                         <h1>
-                            <field name="name"/>
+                            <field name="name" placeholder="e.g. Business Lunch"/>
                         </h1>
                         <label for="partner_ids" string="Attendees" class="oe_edit_only"/>
                         <h2>
                             <field name="partner_ids" widget="many2manyattendee"
+                                placeholder="Select attendees..."
                                 context="{'force_email':True}"
                                 on_change="onchange_partner_ids(partner_ids)"
                                 class="oe_inline"/>
@@ -104,13 +105,14 @@
                                     <field name="start_date" string="Starting at" on_change="onchange_dates('start', start_date, stop_date, allday, True)" attrs="{'invisible': [('allday','=',False)]}"/>
                                     <field name="stop_date" string="Ending at" on_change="onchange_dates('stop', start_date, stop_date, allday, True)" attrs="{'invisible': [('allday','=',False)]}"/>
 
-                                    <field name="start_datetime" string="Starting at" on_change="onchange_dates('start', start_datetime, stop_datetime, allday, False)" attrs="{'invisible': [('allday','=',True)]}"/>
-                                    <field name="stop_datetime" string="Ending at" on_change="onchange_dates('stop', start_datetime, stop_datetime, allday, False)" attrs="{'invisible': [('allday','=',True)]}"/>
-                                    <label for="allday"/>
-                                    <div>
-                                        <field name="allday"  class="oe_inline" on_change="onchange_allday(start, stop, start_date, stop_date, start_datetime, stop_datetime, allday)"/>
+                                    <field name="start_datetime" string="Starting at" on_change="onchange_duration(start_datetime, duration)" attrs="{'invisible': [('allday','=',True)]}"/>
+                                    <field name="stop_datetime" invisible="1"/>
+                                    <label for="duration" attrs="{'invisible': [('allday','=',True)]}"/>
+                                    <div attrs="{'invisible': [('allday','=',True)]}">
+                                        <field name="duration" widget="float_time" string="Duration" on_change="onchange_duration(start_datetime, duration)" class="oe_inline"/>
+                                        <span> hours</span>
                                     </div>
-                                    <field name="duration" widget="float_time" class="oe_inline" attrs="{ 'invisible': True }"/>
+                                    <field name="allday"  on_change="onchange_allday(start, stop, start_date, stop_date, start_datetime, stop_datetime, allday)"/>
                                 </group>
                                 <group>
                                     <field name="categ_ids" widget="many2many_tags" />
@@ -192,11 +194,11 @@
                             </field>
                         </page>
                         <page string="Misc" groups="base.group_no_one">
-                            <label string="Owner"/>
-                            <field name="user_id" />
-                            
+                            <group>
+                                <label for="user_id" string="Owner"/>
+                                <field name="user_id" nolabel="1"/>
+                            </group>
                         </page>
-
                     </notebook>
                 </sheet>
                 <div class="oe_chatter">
@@ -220,17 +222,20 @@
                     <group>
                         <field name="start_date" string="Starting at" attrs="{'invisible': [('allday','=',False)]}"/>
                         <field name="start_datetime" string="Starting at" attrs="{'invisible': [('allday','=',True)]}"/>
-        
-                        <field name="duration" string="Duration" widget="float_time" attrs="{'invisible': [('allday','=',True)]}"/>
+                        <label for="duration" attrs="{'invisible': [('allday','=',True)]}"/>
+                        <div attrs="{'invisible': [('allday','=',True)]}">
+                            <field name="duration" widget="float_time" class="oe_inline"/>
+                            <span> hours</span>
+                        </div>
                         <field name="allday" class="oe_inline" attrs="{'invisible': [('allday','=',False)]}"/>
                         <field name="partner_ids" widget="many2manyattendee" string="Attendees"/>
                     </group>
                     <group>
+                        <field name="location"/>
                         <field name="categ_ids" widget="many2many_tags"/>
                         <field name="alarm_ids" widget="many2many_tags" />
-                        <field name="location"/>
                     </group>
-                </group>       
+                </group>
             </form>
         </field>
     </record>
@@ -241,7 +246,7 @@
         <field name="name">CRM - Meetings Tree</field>
         <field name="model">calendar.event</field>
         <field name="arch" type="xml">
-            <tree string="Meetings" decoration-bf="message_unread==True">
+            <tree string="Meetings" decoration-bf="message_needaction==True">
                 <field name="name" string="Subject"/>
                 <field name="allday" invisible="True"/>
                 <field name="start" string="Start Date"/>
@@ -250,14 +255,14 @@
                 <field name="location"/>
                 <field name="state" invisible="True"/>
                 <field name="duration"/>
-                <field name="message_unread" invisible="1"/>
+                <field name="message_needaction" invisible="1"/>
             </tree>
         </field>
     </record>
 
     <!-- CRM Meeting Calendar -->
     <record model="ir.ui.view" id="view_calendar_event_calendar">
-        <field name="name">Meetings Calendar</field>
+        <field name="name">Meeting</field>
         <field name="model">calendar.event</field>
         <field name="priority" eval="2"/>
         <field name="arch" type="xml">
@@ -269,16 +274,6 @@
                 <field name="color_partner_id"/>
                 <field name="partner_ids"/>
             </calendar>
-        </field>
-    </record>
-
-    <!-- CRM Meeting Gantt  -->
-
-    <record id="view_calendar_event_gantt" model="ir.ui.view">
-        <field name="name">CRM - Meetings Gantt</field>
-        <field name="model">calendar.event</field>
-        <field name="arch" type="xml">
-            <gantt date_delay="duration" date_start="start" string="Meetings"/>
         </field>
     </record>
 
@@ -296,7 +291,7 @@
                 <field name="class" string="Privacy"/>
                 <filter string="My Events" domain="[('user_id','=',uid)]" help="My Events"/>
                 <filter string="My Meetings" help="My Meetings" name="mymeetings" context='{"mymeetings": 1}'/>
-                <filter string="Unread Messages" name="message_unread" domain="[('message_unread','=',True)]"/>
+                <filter string="Important Messages" name="message_needaction" domain="[('message_needaction','=',True)]"/>
                 <separator/>
                 <group expand="0" string="Group By">
                     <filter string="Responsible" domain="[]" context="{'group_by':'user_id'}"/>
@@ -310,7 +305,7 @@
     <record id="action_calendar_event" model="ir.actions.act_window">
         <field name="name">Meetings</field>
         <field name="res_model">calendar.event</field>
-        <field name="view_mode">calendar,tree,form,gantt</field>
+        <field name="view_mode">calendar,tree,form</field>
         <field name="view_id" ref="view_calendar_event_calendar"/>
         <field name="search_view_id" ref="view_calendar_event_search"/>
         <field name="help" type="html">
@@ -341,16 +336,10 @@
         <field name="view_mode">form</field>
         <field name="view_id" ref="view_calendar_event_form"/>
     </record>
-    <record model="ir.actions.act_window.view" id="action_view_calendar_event_gantt">
-        <field name="act_window_id" ref="action_calendar_event"/>
-        <field name="sequence" eval="4"/>
-        <field name="view_mode">gantt</field>
-        <field name="view_id" ref="view_calendar_event_gantt"/>
-    </record>
 
 
 
-    <menuitem name="Calendar" id="mail_menu_calendar" sequence="2" action="action_calendar_event" web_icon="calendar,static/description/icon.png"/>
+    <menuitem name="Calendar" id="mail_menu_calendar" sequence="2" action="action_calendar_event" web_icon="calendar,static/description/icon.png" groups="base.group_user"/>
     <menuitem id="menu_calendar_configuration" name="Calendar" parent="base.menu_custom" groups="base.group_no_one"/>
     <menuitem id="menu_calendar_event_type" parent="menu_calendar_configuration" action="action_calendar_event_type" groups="base.group_no_one"/>
     <menuitem id="menu_calendar_alarm" parent="menu_calendar_configuration" action="action_calendar_alarm" groups="base.group_no_one"/>
@@ -359,7 +348,7 @@
     <record id="action_calendar_event_notify" model="ir.actions.act_window">
         <field name="name">Meetings</field>
         <field name="res_model">calendar.event</field>
-        <field name="view_mode">form,calendar,tree,gantt</field>
+        <field name="view_mode">form,calendar,tree</field>
         <field name="view_id" ref="view_calendar_event_form"/>
     </record>
        

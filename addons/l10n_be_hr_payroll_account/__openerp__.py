@@ -3,7 +3,6 @@
 {
     'name': 'Belgium - Payroll with Accounting',
     'category': 'Localization',
-    'author': 'OpenERP SA',
     'depends': ['l10n_be_hr_payroll', 'hr_payroll_account', 'l10n_be'],
     'version': '1.0',
     'description': """
@@ -16,7 +15,7 @@ Accounting Data for Belgian Payroll Rules.
     'demo': [],
     'data':[
         'l10n_be_hr_payroll_account_data.xml',
-        'data/hr.salary.rule.csv',
     ],
-    'installable': False
+    'post_init_hook': '_set_accounts',
+    'installable': True
 }

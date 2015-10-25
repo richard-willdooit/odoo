@@ -9,7 +9,6 @@
 Generates Intrastat XML report for declaration
 Based on invoices.
     """,
-    'author': 'Odoo SA',
     'depends': ['report_intrastat', 'sale_stock', 'account_accountant', 'l10n_be'],
     'data': [
         'data/regions.xml',
@@ -21,5 +20,5 @@ Based on invoices.
         'l10n_be_intrastat.xml',
         'wizard/l10n_be_intrastat_xml_view.xml',
     ],
-    'installable': False,
+    'installable': True,
 }

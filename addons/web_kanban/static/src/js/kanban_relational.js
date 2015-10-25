@@ -33,6 +33,9 @@ var One2ManyKanbanView = X2ManyKanbanView.extend({
             read_function: function(ids, fields, options) {
                 return self.x2m.data_read(ids, fields, options);
             },
+            parent_view: self.x2m.view,
+            child_name: self.x2m.name,
+            form_view_options: {'not_interactible_on_create':true},
             on_selected: function() {
                 self.x2m.reload_current_view();
             }
@@ -62,8 +65,8 @@ var Many2ManyKanbanView = X2ManyKanbanView.extend({
             res_id: event.data.id,
             context: this.x2m.build_context(),
             title: _t("Open: ") + this.x2m.string,
-            write_function: function(id, data) {
-                return self.x2m.data_update(id, data, {}).done(function() {
+            write_function: function(id, data, options) {
+                return self.x2m.data_update(id, data, options).done(function() {
                     self.x2m.reload_current_view();
                 });
             },

@@ -14,13 +14,14 @@ if(!$('#oe_systray').length) {
     return $.Deferred().reject("DOM doesn't contain '#oe_systray'");
 }
 
-var WebsitePlannerLauncher = Widget.extend({
+var WebsitePlannerLauncher = Widget.extend(planner.PlannerHelpMixin, {
     template: "PlannerLauncher",
     start: function() {
         var self = this;
         var res = this._super.apply(this, arguments);
         return res.then(this.get_website_planner.bind(this)).then(function(planner) {
-            self.$el.filter('.o_planner_systray').on('click', self, self.toggle_dialog.bind(self));
+            self.$el.filter('.o_planner_systray').on('click', self, self.show_dialog.bind(self));
+            self.$el.filter('.o_planner_help').on('click', '.dropdown-menu li a[data-menu]', self.on_menu_help);
             if (planner.length) {
                 self.planner = planner[0];
                 self.planner.data = $.parseJSON(planner[0].data) || {};
@@ -34,8 +35,8 @@ var WebsitePlannerLauncher = Widget.extend({
     setup: function() {
         var self = this;
         this.dialog = new planner.PlannerDialog(this, this.planner);
-        this.dialog.appendTo(document.body);
-        this.$(".o_planner_progress").tooltip({html: true, title: this.planner.tooltip_planner, placement: 'bottom', container: 'body', delay: {'show': 700}});
+        this.dialog.appendTo($('<div>'));
+        this.$(".progress").tooltip({html: true, title: this.planner.tooltip_planner, placement: 'bottom', container: 'body', delay: {'show': 700}});
         this.dialog.on("planner_progress_changed", this, function(percent) {
             self.update_parent_progress_bar(percent);
         });
@@ -43,8 +44,9 @@ var WebsitePlannerLauncher = Widget.extend({
     update_parent_progress_bar: function(percent) {
         this.$(".progress-bar").css('width', percent+"%");
     },
-    toggle_dialog: function() {
-        this.dialog.do_toggle();
+    show_dialog: function() {
+        this.dialog.$el.appendTo(document.body);
+        this.dialog.$el.modal('show');
     },
 });
 

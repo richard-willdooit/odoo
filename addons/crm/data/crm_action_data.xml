@@ -7,13 +7,9 @@
         </record>
         <record id="crm_activity_data_call" model="crm.activity">
             <field name="name">Call</field>
-            <field name="activity_1_id" ref="crm_activity_data_email"/>
         </record>
         <record id="crm_activity_data_meeting" model="crm.activity">
             <field name="name">Task</field>
-            <field name="days">3</field>
-            <field name="activity_1_id" ref="crm_activity_data_call"/>
-            <field name="activity_2_id" ref="crm_activity_data_email"/>
         </record>
 
     </data>

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 import logging
+import pytz
 import time
 
 from datetime import datetime, timedelta
@@ -16,7 +17,7 @@ def _create_sequence(cr, seq_name, number_increment, number_next):
     There is no access rights check.
     """
     if number_increment == 0:
-        raise UserError(_('Increment number must not be zero.'))
+        raise UserError(_('Step must not be zero.'))
     sql = "CREATE SEQUENCE %s INCREMENT BY %%s START WITH %%s" % seq_name
     cr.execute(sql, (number_increment, number_next))
 
@@ -39,7 +40,7 @@ def _alter_sequence(cr, seq_name, number_increment=None, number_next=None):
     There is no access rights check.
     """
     if number_increment == 0:
-        raise UserError(_("Increment number must not be zero."))
+        raise UserError(_("Step must not be zero."))
     cr.execute("SELECT relname FROM pg_class WHERE relkind = %s AND relname=%s", ('S', seq_name))
     if not cr.fetchone():
         # sequence is not created yet, we're inside create() so ignore it, will be set later
@@ -111,9 +112,9 @@ class ir_sequence(models.Model):
                                         required=True, string='Next Number', default=1,
                                         help="Next number that will be used. This number can be incremented "
                                         "frequently so the displayed value might already be obsolete")
-    number_increment = fields.Integer('Increment Number', required=True, default=1,
+    number_increment = fields.Integer('Step', required=True, default=1,
                                       help="The next number of the sequence will be incremented by this number")
-    padding = fields.Integer('Number Padding', required=True, default=0,
+    padding = fields.Integer('Sequence Size', required=True, default=0,
                              help="Odoo will automatically adds some '0' on the left of the "
                              "'Next Number' to get the required padding size.")
     company_id = fields.Many2one('res.company', 'Company',
@@ -193,23 +194,21 @@ class ir_sequence(models.Model):
             return ''
 
         def _interpolation_dict():
+            now = datetime.now(pytz.timezone(self.env.context.get('tz') or 'UTC'))
             if self.env.context.get('ir_sequence_date'):
-                t = time.strptime(self.env.context.get('ir_sequence_date'), '%Y-%m-%d')
+                t = datetime.strptime(self.env.context.get('ir_sequence_date'), '%Y-%m-%d')
             else:
-                t = time.localtime()  # Actually, the server is always in UTC.
-            return {
-                'year': time.strftime('%Y', t),
-                'month': time.strftime('%m', t),
-                'day': time.strftime('%d', t),
-                'y': time.strftime('%y', t),
-                'doy': time.strftime('%j', t),
-                'woy': time.strftime('%W', t),
-                'weekday': time.strftime('%w', t),
-                'h24': time.strftime('%H', t),
-                'h12': time.strftime('%I', t),
-                'min': time.strftime('%M', t),
-                'sec': time.strftime('%S', t),
+                t = now
+            sequences = {
+                'year': '%Y', 'month': '%m', 'day': '%d', 'y': '%y', 'doy': '%j', 'woy': '%W',
+                'weekday': '%w', 'h24': '%H', 'h12': '%I', 'min': '%M', 'sec': '%S'
             }
+            res = {}
+            for key, sequence in sequences.iteritems():
+                res[key] = now.strftime(sequence)
+                res['range_' + key] = t.strftime(sequence)
+
+            return res
 
         d = _interpolation_dict()
         try:

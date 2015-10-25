@@ -4,6 +4,7 @@
 import time
 from psycopg2 import OperationalError
 
+from openerp import api
 from openerp import SUPERUSER_ID
 from openerp.osv import fields, osv
 import openerp.addons.decimal_precision as dp
@@ -109,9 +110,6 @@ class procurement_order(osv.osv):
         'product_qty': fields.float('Quantity', digits_compute=dp.get_precision('Product Unit of Measure'), required=True, states={'confirmed': [('readonly', False)]}, readonly=True),
         'product_uom': fields.many2one('product.uom', 'Product Unit of Measure', required=True, states={'confirmed': [('readonly', False)]}, readonly=True),
 
-        'product_uos_qty': fields.float('UoS Quantity', states={'confirmed': [('readonly', False)]}, readonly=True),
-        'product_uos': fields.many2one('product.uom', 'Product UoS', states={'confirmed': [('readonly', False)]}, readonly=True),
-
         'state': fields.selection([
             ('cancel', 'Cancelled'),
             ('confirmed', 'Confirmed'),
@@ -141,6 +139,13 @@ class procurement_order(osv.osv):
                 raise UserError(_('Cannot delete Procurement Order(s) which are in %s state.') % s['state'])
         return osv.osv.unlink(self, cr, uid, unlink_ids, context=context)
 
+    def create(self, cr, uid, vals, context=None):
+        context = context or {}
+        procurement_id = super(procurement_order, self).create(cr, uid, vals, context=context)
+        if not context.get('procurement_autorun_defer'):
+            self.run(cr, uid, [procurement_id], context=context)
+        return procurement_id
+
     def do_view_procurements(self, cr, uid, ids, context=None):
         '''
         This function returns an action that display existing procurement orders
@@ -154,7 +159,7 @@ class procurement_order(osv.osv):
         return result
 
     def onchange_product_id(self, cr, uid, ids, product_id, context=None):
-        """ Finds UoM and UoS of changed product.
+        """ Finds UoM of changed product.
         @param product_id: Changed id of product.
         @return: Dictionary of values.
         """
@@ -162,7 +167,6 @@ class procurement_order(osv.osv):
             w = self.pool.get('product.product').browse(cr, uid, product_id, context=context)
             v = {
                 'product_uom': w.uom_id.id,
-                'product_uos': w.uos_id and w.uos_id.id or w.uom_id.id
             }
             return {'value': v}
         return {}
@@ -179,6 +183,11 @@ class procurement_order(osv.osv):
     def reset_to_confirmed(self, cr, uid, ids, context=None):
         return self.write(cr, uid, ids, {'state': 'confirmed'}, context=context)
 
+    @api.v8
+    def run(self, autocommit=False):
+        return self._model.run(self._cr, self._uid, self.ids, autocommit=False, context=self._context)
+
+    @api.v7
     def run(self, cr, uid, ids, autocommit=False, context=None):
         for procurement_id in ids:
             #we intentionnaly do the browse under the for loop to avoid caching all ids which would be resource greedy
@@ -246,7 +255,7 @@ class procurement_order(osv.osv):
         #if the procurement already has a rule assigned, we keep it (it has a higher priority as it may have been chosen manually)
         if procurement.rule_id:
             return True
-        elif procurement.product_id.type != 'service':
+        elif procurement.product_id.type not in ('service', 'digital'):
             rule_id = self._find_suitable_rule(cr, uid, procurement, context=context)
             if rule_id:
                 self.write(cr, uid, [procurement.id], {'rule_id': rule_id}, context=context)

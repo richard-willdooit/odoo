@@ -111,7 +111,7 @@ class procurement_order(osv.osv):
         for procurement in procurements:
             if procurement.rule_id:
                 res[procurement.id] = True
-            elif procurement.product_id.type != 'service':
+            elif procurement.product_id.type in ['product', 'consu']:
                 todo_procs += [procurement]
 
         res_dict = self._find_suitable_rule_multi(cr, uid, todo_procs, context=context)
@@ -279,20 +279,15 @@ class procurement_order(osv.osv):
         #it is possible that we've already got some move done, so check for the done qty and create
         #a new move with the correct qty
         already_done_qty = 0
-        already_done_qty_uos = 0
         for move in procurement.move_ids:
             already_done_qty += move.product_uom_qty if move.state == 'done' else 0
-            already_done_qty_uos += move.product_uos_qty if move.state == 'done' else 0
         qty_left = max(procurement.product_qty - already_done_qty, 0)
-        qty_uos_left = max(procurement.product_uos_qty - already_done_qty_uos, 0)
         vals = {
             'name': procurement.name,
             'company_id': procurement.rule_id.company_id.id or procurement.rule_id.location_src_id.company_id.id or procurement.rule_id.location_id.company_id.id or procurement.company_id.id,
             'product_id': procurement.product_id.id,
             'product_uom': procurement.product_uom.id,
             'product_uom_qty': qty_left,
-            'product_uos_qty': (procurement.product_uos and qty_uos_left) or qty_left,
-            'product_uos': (procurement.product_uos and procurement.product_uos.id) or procurement.product_uom.id,
             'partner_id': procurement.rule_id.partner_address_id.id or (procurement.group_id and procurement.group_id.partner_id.id) or False,
             'location_id': procurement.rule_id.location_src_id.id,
             'location_dest_id': procurement.location_id.id,
@@ -326,6 +321,7 @@ class procurement_order(osv.osv):
 
     def run(self, cr, uid, ids, autocommit=False, context=None):
         new_ids = [x.id for x in self.browse(cr, uid, ids, context=context) if x.state not in ('running', 'done', 'cancel')]
+        context = dict(context or {}, procurement_auto_defer=True) #When creating
         res = super(procurement_order, self).run(cr, uid, new_ids, autocommit=autocommit, context=context)
 
         #after all the procurements are run, check if some created a draft stock move that needs to be confirmed
@@ -336,6 +332,10 @@ class procurement_order(osv.osv):
                 move_to_confirm_ids += [m.id for m in procurement.move_ids if m.state == 'draft']
         if move_to_confirm_ids:
             self.pool.get('stock.move').action_confirm(cr, uid, move_to_confirm_ids, context=context)
+        # If procurements created other procurements, run the created in batch
+        procurement_ids = self.search(cr, uid, [('move_dest_id.procurement_id', 'in', new_ids)], order='id', context=context)
+        if procurement_ids:
+            res = res and self.run(cr, uid, procurement_ids, autocommit=autocommit, context=context)
         return res
 
     def _check(self, cr, uid, procurement, context=None):
@@ -425,7 +425,7 @@ class procurement_order(osv.osv):
         days = orderpoint.lead_days or 0.0
         if orderpoint.lead_type=='purchase':
             # These days will be substracted when creating the PO
-            days += orderpoint.product_id.seller_delay or 0.0
+            days += orderpoint.product_id._select_seller(orderpoint.product_id).delay or 0.0
         date_planned = start_date + relativedelta(days=days)
         return date_planned.strftime(DEFAULT_SERVER_DATE_FORMAT)
 

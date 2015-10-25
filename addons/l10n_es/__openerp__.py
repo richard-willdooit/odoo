@@ -9,7 +9,7 @@
 #                    Pedro Manuel Baeza <pedro.baeza@serviciosbaeza.com>
 
 {
-    "name" : "Spanish Charts of Accounts (PGCE 2008)",
+    "name" : "Spain - Accounting (PGCE 2008)",
     "version" : "4.0",
     "author" : "Spanish Localization Team",
     'website' : 'https://launchpad.net/openerp-spain',
@@ -31,16 +31,13 @@ Spanish charts of accounts (PGCE 2008).
         "account_type.xml",
         "account_chart_template.xml",
         "account_account_common.xml",
-        "account_account_full.xml",
-        "account_account_pymes.xml",
-        "account_account_assoc.xml",
         "taxes_common.xml",
         "fiscal_templates_common.xml",
         "account_chart_template_post.xml",
-        "l10n_es_wizard.xml",
+        "account_chart_template.yml",
     ],
     "demo" : [],
     'auto_install': False,
-    "installable": False,
+    "installable": True,
     'images': ['images/config_chart_l10n_es.png', 'images/l10n_es_chart.png'],
 }

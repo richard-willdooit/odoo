@@ -20,11 +20,7 @@ class TestSale(TestMail):
         account_obj = self.env['account.account']
         # Usefull record id
         group_id = IrModelData.xmlid_to_res_id('account.group_account_invoice') or False
-        product_id = IrModelData.xmlid_to_res_id('product.product_category_3') or False
         company_id = IrModelData.xmlid_to_res_id('base.main_company') or False
-        company = self.env['res.company'].browse(company_id)
-        journal_vals = journal_obj._prepare_bank_journal(company, {'account_type': 'bank', 'acc_name': 'BNK'})
-        journal = journal_obj.create(journal_vals)
 
         # Usefull accounts
         user_type_id = IrModelData.xmlid_to_res_id('account.data_account_type_revenue')
@@ -52,19 +48,23 @@ class TestSale(TestMail):
             'email': 'testcustomer@test.com',
             'property_account_receivable_id': account_recv_id,
         })
-        
+
         # In order to test I create sale order and confirmed it.
         order = self.env['sale.order'].create({
             'partner_id': partner.id,
-            'date_order': datetime.today()})
-        order_line = self.env['sale.order.line'].create({
-            'order_id': order.id,
-            'product_id': product_id})
+            'partner_invoice_id': partner.id,
+            'partner_shipping_id': partner.id,
+            'date_order': datetime.today(),
+            'pricelist_id': self.env.ref('product.list0').id})
         assert order, "Sale order will not created."
         context = {"active_model": 'sale.order', "active_ids": [order.id], "active_id": order.id}
-        order.with_context(context).action_button_confirm()
+        order.with_context(context).action_confirm()
         # Now I create invoice.
-        payment = self.env['sale.advance.payment.inv'].create({'advance_payment_method': 'fixed', 'amount': 5})
+        payment = self.env['sale.advance.payment.inv'].create({
+            'advance_payment_method': 'fixed',
+            'amount': 5,
+            'product_id': self.env.ref('sale.advance_product_0').id,
+        })
         invoice = payment.with_context(context).create_invoices()
         assert order.invoice_ids, "No any invoice is created for this sale order"
         # Now I validate pay invoice wihth Test User(invoicing and payment).

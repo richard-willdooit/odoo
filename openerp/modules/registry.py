@@ -11,7 +11,7 @@ import threading
 
 import openerp
 from .. import SUPERUSER_ID
-from openerp.tools import assertion_report, lazy_property, classproperty, config
+from openerp.tools import assertion_report, lazy_property, classproperty, config, topological_sort
 from openerp.tools.lru import LRU
 
 _logger = logging.getLogger(__name__)
@@ -88,6 +88,10 @@ class Registry(Mapping):
         return self.models[model_name]
 
     @lazy_property
+    def model_cache(self):
+        return RegistryManager.model_cache
+
+    @lazy_property
     def pure_function_fields(self):
         """ Return the list of pure function fields (field objects) """
         fields = []
@@ -96,6 +100,25 @@ class Registry(Mapping):
             for fname in fnames:
                 fields.append(model_fields[fname])
         return fields
+
+    @lazy_property
+    def field_sequence(self):
+        """ Return a function mapping a field to an integer. The value of a
+            field is guaranteed to be strictly greater than the value of the
+            field's dependencies.
+        """
+        # map fields on their dependents
+        dependents = {
+            field: set(dep for dep, _ in model._field_triggers[field] if dep != field)
+            for model in self.itervalues()
+            for field in model._fields.itervalues()
+        }
+        # sort them topologically, and associate a sequence number to each field
+        mapping = {
+            field: num
+            for num, field in enumerate(reversed(topological_sort(dependents)))
+        }
+        return mapping.get
 
     def clear_manual_fields(self):
         """ Invalidate the cache for manual fields. """
@@ -222,6 +245,10 @@ class Registry(Mapping):
                     r, c)
         return r, c
 
+    def in_test_mode(self):
+        """ Test whether the registry is in 'test' mode. """
+        return self.test_cr is not None
+
     def enter_test_mode(self):
         """ Enter the 'test' mode, where one cursor serves several requests. """
         assert self.test_cr is None
@@ -269,6 +296,7 @@ class RegistryManager(object):
 
     """
     _registries = None
+    _model_cache = None
     _lock = threading.RLock()
     _saved_lock = None
 
@@ -289,6 +317,14 @@ class RegistryManager(object):
 
             cls._registries = LRU(size)
         return cls._registries
+
+    @classproperty
+    def model_cache(cls):
+        """ A cache for model classes, indexed by their base classes. """
+        if cls._model_cache is None:
+            # we cache 256 classes per registry on average
+            cls._model_cache = LRU(cls.registries.count * 256)
+        return cls._model_cache
 
     @classmethod
     def lock(cls):

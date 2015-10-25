@@ -1,7 +1,9 @@
 odoo.define('web.ajax', function (require) {
 "use strict";
 
+var core = require('web.core');
 var time = require('web.time');
+var utils = require('web.utils');
 
 function genericJsonRpc (fct_name, params, fct) {
     var data = {
@@ -13,7 +15,9 @@ function genericJsonRpc (fct_name, params, fct) {
     var xhr = fct(data);    
     var result = xhr.pipe(function(result) {
         if (result.error !== undefined) {
-            console.error("Server application error", result.error);
+            if (result.error.data.arguments[0] !== "bus.Bus not available in test mode") {
+                console.error("Server application error", JSON.stringify(result.error));
+            }
             return $.Deferred().reject("server", result.error);
         } else {
             return result.result;
@@ -237,6 +241,11 @@ function get_file(options) {
             method: 'POST'
         }).appendTo(document.body);
     }
+    if (core.csrf_token) {
+        $('<input type="hidden" name="csrf_token">')
+                .val(core.csrf_token)
+                .appendTo($form_data);
+    }
 
     var hparams = _.extend({}, options.data || {}, {token: token});
     _.each(hparams, function (value, key) {
@@ -273,6 +282,48 @@ function get_file(options) {
     };
     timer = setTimeout(waitLoop, CHECK_INTERVAL);
 };
+
+function post (controller_url, data) {
+
+    var progressHandler = function (deferred) {
+        return function (state) {
+            if(state.lengthComputable) {
+                deferred.notify({
+                    h_loaded: utils.human_size(state.loaded),
+                    h_total : utils.human_size(state.total),
+                    loaded  : state.loaded,
+                    total   : state.total,
+                    pcent   : Math.round((state.loaded/state.total)*100)
+                });
+            }
+        };
+    };
+
+    var Def = $.Deferred();
+    var postData = new FormData();
+    
+    $.each(data, function(i,val) {
+        postData.append(i, val);
+    });
+    if (core.csrf_token) {
+        postData.append('csrf_token', core.csrf_token);
+    }
+
+    var xhr = new XMLHttpRequest();
+    if(xhr.upload) xhr.upload.addEventListener('progress', progressHandler(Def), false);
+      
+    var ajaxDef = $.ajax(controller_url, {
+        xhr: function() {return xhr;},
+        data:           postData,
+        processData:    false,
+        contentType:    false,
+        type:           'POST'
+    }).then(function (data) {Def.resolve(data);})
+    .fail(function (data) {Def.reject(data);});
+
+    return Def;
+}
+
 
 
 var loadXML = (function () {
@@ -315,6 +366,7 @@ return {
     loadJS: loadJS,
     loadXML: loadXML,
     get_file: get_file,
+    post: post,
 };
 
 });

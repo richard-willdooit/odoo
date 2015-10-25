@@ -4,7 +4,6 @@
 {
     'name': 'WMS Landed Costs',
     'version': '1.1',
-    'author': 'OpenERP SA',
     'summary': 'Landed Costs',
     'description': """
 Landed Costs Management
@@ -23,7 +22,6 @@ This module allows you to easily add extra costs on pickings and decide the spli
         'product_view.xml',
         'stock_landed_costs_view.xml',
         'stock_landed_costs_data.xml',
-        'purchase_config_settings_views.xml',
     ],
     'test': [
         '../account/test/account_minimal_test.xml',
