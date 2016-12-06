@@ -280,7 +280,7 @@ var ScaleScreenWidget = ScreenWidget.extend({
             return self.pos.proxy.scale_read().then(function(weight){
                 self.set_weight(weight.weight);
             });
-        },{duration:50, repeat: true});
+        },{duration:150, repeat: true});
 
     },
     get_product: function(){
@@ -1865,7 +1865,7 @@ var PaymentScreenWidget = ScreenWidget.extend({
         var plines = order.get_paymentlines();
         for (var i = 0; i < plines.length; i++) {
             if (plines[i].get_type() === 'bank' && plines[i].get_amount() < 0) {
-                this.pos_widget.screen_selector.show_popup('error',{
+                this.gui.show_popup('error',{
                     'message': _t('Negative Bank Payment'),
                     'comment': _t('You cannot have a negative amount in a Bank payment. Use a cash payment method to return money to the customer.'),
                 });
