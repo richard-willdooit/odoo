@@ -11,12 +11,13 @@
 # Xavier Belmere <Info@cartmeleon.com>, 2016
 # Melanie Bernard <mbe@odoo.com>, 2016
 # Richard Mathot <rim@odoo.com>, 2016
+# Alexis de Lattre <alexis@via.ecp.fr>, 2016
 # Lionel Sausin <ls@numerigraphe.com>, 2016
 # Lucas Deliege <lud@odoo.com>, 2016
 # Florian Hatat <mininet@wanadoo.fr>, 2016
 # Henri Cornuau <hcornuau@gmail.com>, 2016
 # Olivier Dony <odo@odoo.com>, 2016
-# Frédéric LIETART <stuff@thelinuxfr.org>, 2016
+# Frédéric LIETART <stuff@tifred.fr>, 2016
 # Fabri Yohann <psn@fabri.pw>, 2016
 # Fabien Pinckaers <fp@openerp.com>, 2016
 # Christophe Dubuit <cdubuit@yahoo.com>, 2016
@@ -26,8 +27,8 @@
 # Nicolas Martinelli <nim@odoo.com>, 2016
 # Jean-Marc Dupont <jmd@6it.fr>, 2016
 # Kévin R. <realrom@hotmail.fr>, 2016
-# Miguel Vidali <mvidali129@gmail.com>, 2016
 # Jérôme Tanché <jerome.tanche@ouest-dsi.fr>, 2016
+# zeroheure <xavier@alternatif.org>, 2016
 # Fabien Bourgeois <fabien@yaltik.com>, 2016
 # Matillon Samantha <smatillon@gmail.com>, 2016
 # Guewen Baconnier <guewen.baconnier@camptocamp.com>, 2016
@@ -38,13 +39,15 @@
 # Leo Schmitt <inactive+lschmitt@transifex.com>, 2016
 # Sébastien LANGE (SYLEAM) <sebastien.lange@syleam.fr>, 2016
 # Nancy Bolognesi <nb@microcom.ca>, 2016
+# Jérémy Donas <LeDistordu@users.noreply.github.com>, 2016
+# Hadrien TOMA <toma.hadrien@gmail.com>, 2016
 msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 10.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2016-11-14 15:54+0000\n"
-"PO-Revision-Date: 2016-11-14 15:54+0000\n"
-"Last-Translator: Nancy Bolognesi <nb@microcom.ca>, 2016\n"
+"POT-Creation-Date: 2017-01-27 11:58+0000\n"
+"PO-Revision-Date: 2017-01-27 11:58+0000\n"
+"Last-Translator: Hadrien TOMA <toma.hadrien@gmail.com>, 2016\n"
 "Language-Team: French (https://www.transifex.com/odoo/teams/41243/fr/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -4984,8 +4987,8 @@ msgid ""
 "<strong>This operation will permanently erase all data currently stored by "
 "the modules!</strong>"
 msgstr ""
-"<strong>Cette opération effecera de façon définitive toute l'information "
-"stockée dans les modules!</strong>"
+"<strong>Cette opération effacera de façon définitive toute l'information "
+"enregistrée par ces modules!</strong>"
 
 #. module: base
 #: model:ir.ui.view,arch_db:base.report_irmodeloverview
@@ -6032,6 +6035,12 @@ msgid "Automatic Installation"
 msgstr "Installation automatisée"
 
 #. module: base
+#: code:addons/base/module/module.py:650
+#, python-format
+msgid "Automatic install of downloaded Apps is currently disabled."
+msgstr ""
+
+#. module: base
 #: model:ir.model.fields,help:base.field_ir_translation_state
 msgid ""
 "Automatically set to let administators find new terms that might need to be "
@@ -7065,7 +7074,7 @@ msgstr "Type de société"
 #. module: base
 #: model:ir.model.fields,field_description:base.field_res_company_company_registry
 msgid "Company registry"
-msgstr ""
+msgstr "Registre du commerce et des Sociétés"
 
 #. module: base
 #: model:ir.model.fields,field_description:base.field_res_partner_contact_address
@@ -12207,7 +12216,7 @@ msgstr "M."
 #. module: base
 #: model:res.partner.title,shortcut:base.res_partner_title_madam
 msgid "Mrs."
-msgstr "Mme."
+msgstr "Mme"
 
 #. module: base
 #: model:ir.ui.view,arch_db:base.view_users_form
@@ -13472,7 +13481,7 @@ msgstr "Extension du module article pour le suivi des achats et des ventes"
 #: model:ir.module.category,name:base.module_category_productivity
 #: model:ir.module.module,shortdesc:base.module_note
 msgid "Productivity"
-msgstr ""
+msgstr "Productivité"
 
 #. module: base
 #: model:ir.module.module,shortdesc:base.module_product
@@ -15016,7 +15025,7 @@ msgstr "États"
 #: model:ir.model.fields,field_description:base.field_wkf_workitem_state
 #: model:ir.ui.view,arch_db:base.view_workflow_workitem_search
 msgid "Status"
-msgstr "Statut"
+msgstr "État"
 
 #. module: base
 #: model:ir.model.fields,field_description:base.field_ir_sequence_number_increment
@@ -16032,7 +16041,7 @@ msgstr ""
 #. module: base
 #: model:ir.module.module,summary:base.module_hr_timesheet_sheet
 msgid "Timesheets, Activities"
-msgstr ""
+msgstr "Feuilles de Temps, Activités"
 
 #. module: base
 #: model:ir.module.module,shortdesc:base.module_hr_timesheet_attendance
@@ -16096,6 +16105,13 @@ msgstr "À désinstaller"
 #: selection:ir.module.module.dependency,state:0
 msgid "To be upgraded"
 msgstr "À mettre à jour"
+
+#. module: base
+#: code:addons/base/module/module.py:651
+#, python-format
+msgid ""
+"To enable it, make sure this directory exists and is writable on the server:"
+msgstr ""
 
 #. module: base
 #: model:ir.ui.view,arch_db:base.ir_actions_todo_tree
