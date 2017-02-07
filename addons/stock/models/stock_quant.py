@@ -44,7 +44,7 @@ class Quant(models.Model):
     lot_id = fields.Many2one(
         'stock.production.lot', 'Lot/Serial Number',
         index=True, ondelete="restrict", readonly=True)
-    cost = fields.Float('Unit Cost')
+    cost = fields.Float('Unit Cost', group_operator='avg')
     owner_id = fields.Many2one(
         'res.partner', 'Owner',
         index=True, readonly=True,
@@ -697,7 +697,6 @@ class QuantPackage(models.Model):
             # TDE FIXME: why superuser ?
             package.mapped('quant_ids').sudo().write({'package_id': package.parent_id.id})
             package.mapped('children_ids').write({'parent_id': package.parent_id.id})
-        self.unlink()
         return self.env['ir.actions.act_window'].for_xml_id('stock', 'action_package_view')
 
     @api.multi
