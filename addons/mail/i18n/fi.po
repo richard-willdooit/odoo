@@ -844,7 +844,7 @@ msgstr ""
 #: code:addons/mail/models/mail_thread.py:356
 #, python-format
 msgid "Click here to add new %s"
-msgstr ""
+msgstr "Paina tästä lisätäksesi uusi %s"
 
 #. module: mail
 #: model:ir.actions.act_window,help:mail.mail_shortcode_action
@@ -2853,7 +2853,7 @@ msgstr "Ei tähdellä merkittyjä viestejä"
 #: model:ir.model.fields,field_description:mail.field_mail_message_no_auto_thread
 #: model:ir.model.fields,field_description:mail.field_survey_mail_compose_message_no_auto_thread
 msgid "No threading for answers"
-msgstr ""
+msgstr "Älä tee vastauksista viestiketjuja"
 
 #. module: mail
 #: model:mail.message.subtype,name:mail.mt_note
