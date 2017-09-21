@@ -36,23 +36,22 @@
     var job_deps = [];
     var job_deferred = [];
 
-    var services = Object.create({
-        qweb: new QWeb2.Engine(),
-        $: $,
-        _: _,
-    });
+
+    var services = Object.create({});
 
     var commentRegExp = /(\/\*([\s\S]*?)\*\/|([^:]|^)\/\/(.*)$)/mg;
     var cjsRequireRegExp = /[^.]\s*require\s*\(\s*["']([^'"\s]+)["']\s*\)/g;
 
     var debug = ($.deparam($.param.querystring()).debug !== undefined);
 
-    var odoo = window.odoo = {
+    var odoo = window.odoo = window.odoo || {};
+    _.extend(odoo, {
         testing: typeof QUnit === "object",
         debug: debug,
         remaining_jobs: jobs,
 
         __DEBUG__: {
+            didLogInfo: $.Deferred(),
             get_dependencies: function (name, transitive) {
                 var deps = name instanceof Array ? name: [name],
                     changed;
@@ -140,6 +139,9 @@
             this.process_jobs(jobs, services);
         },
         log: function () {
+            var missing = [];
+            var failed = [];
+
             if (jobs.length) {
                 var debug_jobs = {};
                 var rejected = [];
@@ -179,8 +181,8 @@
                         }
                     }
                 }
-                var missing = odoo.__DEBUG__.get_missing_jobs();
-                var failed = odoo.__DEBUG__.get_failed_jobs();
+                missing = odoo.__DEBUG__.get_missing_jobs();
+                failed = odoo.__DEBUG__.get_failed_jobs();
                 var unloaded = _.filter(debug_jobs, function (job) { return job.missing; });
 
                 var log = [(_.isEmpty(failed) ? (_.isEmpty(unloaded) ? 'info' : 'warning' ) : 'error') + ':', 'Some modules could not be started'];
@@ -192,34 +194,42 @@
                 if (odoo.debug && !_.isEmpty(debug_jobs)) log.push('\nDebug:                  ', debug_jobs);
 
                 if (odoo.debug || !_.isEmpty(failed) || !_.isEmpty(unloaded)) {
-                    console[_.isEmpty(unloaded) ? 'info' : 'error'].apply(console, log);
+                    console[_.isEmpty(failed) || _.isEmpty(unloaded) ? 'info' : 'error'].apply(console, log);
                 }
             }
+            odoo.__DEBUG__.js_modules = {
+                missing: missing,
+                failed: _.pluck(failed, 'name'),
+            };
+            odoo.__DEBUG__.didLogInfo.resolve();
         },
         process_jobs: function (jobs, services) {
             var job;
-            var require;
-            var time;
 
             function process_job (job) {
                 var require = make_require(job);
+
+                var job_exec;
+                var def = $.Deferred();
                 try {
-                    var def = $.Deferred();
-                    $.when(job.factory.call(null, require)).then(
-                        function (data) {
-                            services[job.name] = data;
-                            clearTimeout(time);
-                            time = _.defer(odoo.process_jobs, jobs, services);
-                            def.resolve();
-                        }, function (e) {
-                            job.rejected = e || true;
-                            jobs.push(job);
-                            def.resolve();
-                        });
+                    job_exec = job.factory.call(null, require);
                     jobs.splice(jobs.indexOf(job), 1);
                     job_deferred.push(def);
                 } catch (e) {
                     job.error = e;
+                }
+                if (!job.error) {
+                    $.when(job_exec).then(
+                        function (data) {
+                            services[job.name] = data;
+                            def.resolve();
+                            odoo.process_jobs(jobs, services);
+                        }, function (e) {
+                            job.rejected = e || true;
+                            jobs.push(job);
+                            def.resolve();
+                        }
+                    );
                 }
             }
 
@@ -249,7 +259,8 @@
 
             return services;
         }
-    };
+    });
+
 
     // automatically log errors detected when loading modules
     var log_when_loaded = function () {
@@ -262,7 +273,7 @@
                     log_when_loaded();
                 }
             });
-        }, 1000);
+        }, 4000);
     };
     $(log_when_loaded);
 
