@@ -79,10 +79,10 @@
                 <field name="location_id"/>
                 <field name="lot_id" groups="stock.group_production_lot"/>
                 <field name="package_id" groups="stock.group_tracking_lot"/>
+                <field name="owner_id" groups="stock.group_tracking_owner"/>
                 <field name="reserved_quantity" string="Reserved"/>
                 <field name="quantity" string="On Hand"/>
                 <field name="product_uom_id" groups="product.group_uom"/>
-                <field name="owner_id" groups="stock.group_tracking_owner"/>
                 <field name='company_id' groups="base.group_multi_company"/>
             </tree>
         </field>
@@ -138,8 +138,6 @@
         <field name="name">Current Stock</field>
         <field name="res_model">stock.quant</field>
     </record>
-
-    <menuitem id="menu_quants" name="Inventory" parent="stock.menu_warehouse_report" sequence="100" action="quantsact"/>
 
     <record id="quant_package_search_view" model="ir.ui.view">
         <field name="name">stock.quant.package.search</field>

@@ -185,8 +185,8 @@ class AccountChartTemplate(models.Model):
                     default_account = acc_template_ref.get(self.expense_currency_exchange_account_id.id)
             return default_account
 
-        journals = [{'name': _('Customer Invoices'), 'type': 'sale', 'code': _('INV'), 'favorite': True, 'sequence': 5},
-                    {'name': _('Vendor Bills'), 'type': 'purchase', 'code': _('BILL'), 'favorite': True, 'sequence': 6},
+        journals = [{'name': _('Customer Invoices'), 'type': 'sale', 'code': _('INV'), 'favorite': True, 'color': 11, 'sequence': 5},
+                    {'name': _('Vendor Bills'), 'type': 'purchase', 'code': _('BILL'), 'favorite': True, 'color': 11, 'sequence': 6},
                     {'name': _('Miscellaneous Operations'), 'type': 'general', 'code': _('MISC'), 'favorite': False, 'sequence': 7},
                     {'name': _('Exchange Difference'), 'type': 'general', 'code': _('EXCH'), 'favorite': False, 'sequence': 9},
                     {'name': _('Cash Basis Tax Journal'), 'type': 'general', 'code': _('CABA'), 'favorite': False, 'sequence': 10}]
@@ -204,6 +204,7 @@ class AccountChartTemplate(models.Model):
                 'default_credit_account_id': _get_default_account(journal, 'credit'),
                 'default_debit_account_id': _get_default_account(journal, 'debit'),
                 'show_on_dashboard': journal['favorite'],
+                'color': journal.get('color', False),
                 'sequence': journal['sequence']
             }
             journal_data.append(vals)
@@ -375,6 +376,7 @@ class AccountChartTemplate(models.Model):
                 'tax_ids': [(6, 0, tax_ids)],
                 'company_id': company.id,
                 'tag_ids': [(6, 0, [t.id for t in account_template.tag_ids])],
+                'group_id': account_template.group_id.id,
             }
         return val
 
@@ -901,12 +903,15 @@ class WizardMultiChartsAccounts(models.TransientModel):
         # Install all the templates objects and generate the real objects
         acc_template_ref, taxes_ref = self.chart_template_id._install_template(company, code_digits=self.code_digits, transfer_account_id=self.transfer_account_id)
 
-        # write values of default taxes for product as super user
+        # write values of default taxes for product as super user and write in the config
         IrDefault = self.env['ir.default']
+        IrConfig = self.env['ir.config_parameter']
         if self.sale_tax_id and taxes_ref:
             IrDefault.sudo().set('product.template', "taxes_id", [taxes_ref[self.sale_tax_id.id]], company_id=company.id)
+            IrConfig.sudo().set_param("account.default_sale_tax_id", taxes_ref[self.sale_tax_id.id])
         if self.purchase_tax_id and taxes_ref:
             IrDefault.sudo().set('product.template', "supplier_taxes_id", [taxes_ref[self.purchase_tax_id.id]], company_id=company.id)
+            IrConfig.sudo().set_param("account.default_purchase_tax_id", taxes_ref[self.purchase_tax_id.id])
 
         # Create Bank journals
         self._create_bank_journals_from_o2m(company, acc_template_ref)

@@ -3,6 +3,7 @@
 import base64
 import datetime
 import json
+import os
 import logging
 import requests
 import werkzeug.utils
@@ -17,6 +18,7 @@ from odoo import http, models, fields, _
 from odoo.http import request
 from odoo.tools import pycompat, OrderedSet
 from odoo.addons.http_routing.models.ir_http import slug
+from odoo.addons.website.models.ir_http import _guess_mimetype
 from odoo.addons.web.controllers.main import WebClient, Binary, Home
 from odoo.addons.portal.controllers.portal import pager as portal_pager
 
@@ -207,6 +209,10 @@ class Website(Home):
 
     @http.route(['/website/pages', '/website/pages/page/<int:page>'], type='http', auth="user", website=True)
     def pages_management(self, page=1, sortby='name', search='', **kw):
+        # only website_designer should access the page Management
+        if not request.env.user.has_group('website.group_website_designer'):
+            raise werkzeug.exceptions.NotFound()
+
         Page = request.env['website.page']
         searchbar_sortings = {
             'url': {'label': _('Sort by Url'), 'order': 'url'},
@@ -241,10 +247,20 @@ class Website(Home):
 
     @http.route(['/website/add/', '/website/add/<path:path>'], type='http', auth="user", website=True)
     def pagenew(self, path="", noredirect=False, add_menu=False, template=False):
+        # for supported mimetype, get correct default template
+        _, ext = os.path.splitext(path)
+        mimetype_template = _guess_mimetype(ext)[1]
+        if not template:
+            template = mimetype_template
+
         template = template and dict(template=template) or {}
-        url = request.env['website'].new_page(path, add_menu=add_menu, **template)
+        page = request.env['website'].new_page(path, add_menu=add_menu, **template)
+        url = page['url']
         if noredirect:
             return werkzeug.wrappers.Response(url, mimetype='text/plain')
+
+        if ext and ext != '.html': # redirect non html pages to backend to edit
+            return werkzeug.utils.redirect('/web#id=' + str(page.get('view_id')) + '&view_type=form&model=ir.ui.view')
         return werkzeug.utils.redirect(url + "?enable_editor=1")
 
     @http.route(['/website/snippets'], type='json', auth="user", website=True)

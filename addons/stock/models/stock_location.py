@@ -3,6 +3,7 @@
 
 from datetime import datetime
 from dateutil import relativedelta
+from odoo.exceptions import UserError
 
 from odoo import api, fields, models, _
 from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
@@ -44,7 +45,7 @@ class Location(models.Model):
              "\n* Inventory Loss: Virtual location serving as counterpart for inventory operations used to correct stock levels (Physical inventories)"
              "\n* Procurement: Virtual location serving as temporary counterpart for procurement operations when the source (vendor or production) is not known yet. This location should be empty when the procurement scheduler has finished running."
              "\n* Production: Virtual counterpart location for production operations: this location consumes the raw material and produces finished products"
-             "\n* Transit Location: Counterpart location that should be used in inter-companies or inter-warehouses operations")
+             "\n* Transit Location: Counterpart location that should be used in inter-company or inter-warehouses operations")
     location_id = fields.Many2one(
         'stock.location', 'Parent Location', index=True, ondelete='cascade',
         help="The parent location that includes this location. Example : The 'Dispatch Zone' is the 'Gate 1' parent location.")
@@ -86,6 +87,8 @@ class Location(models.Model):
             name = location.name
             while location.location_id and location.usage != 'view':
                 location = location.location_id
+                if not name:
+                    raise UserError(_('You have to set a name for this location.'))
                 name = location.name + "/" + name
             ret_list.append((orig_location.id, name))
         return ret_list

@@ -403,13 +403,15 @@ class WebsiteSale(http.Controller):
         if not order.cart_quantity:
             request.website.sale_reset()
             return {}
-        if not display:
-            return None
 
         order = request.website.sale_get_order()
         value['cart_quantity'] = order.cart_quantity
         from_currency = order.company_id.currency_id
         to_currency = order.pricelist_id.currency_id
+
+        if not display:
+            return value
+
         value['website_sale.cart_lines'] = request.env['ir.ui.view'].render_template("website_sale.cart_lines", {
             'website_sale_order': order,
             'compute_currency': lambda price: from_currency.compute(price, to_currency),
@@ -427,6 +429,9 @@ class WebsiteSale(http.Controller):
             request.session['sale_order_id'] = None
             request.session['sale_transaction_id'] = None
             return request.redirect('/shop')
+
+        if order and not order.order_line:
+            return request.redirect('/shop/cart')
 
         # if transaction pending / done: redirect to confirmation
         tx = request.env.context.get('website_sale_transaction')
@@ -947,7 +952,7 @@ class WebsiteSale(http.Controller):
     @http.route(['/shop/get_unit_price'], type='json', auth="public", methods=['POST'], website=True)
     def get_unit_price(self, product_ids, add_qty, **kw):
         products = request.env['product.product'].with_context({'quantity': add_qty}).browse(product_ids)
-        return {product.id: product.website_price // add_qty for product in products}
+        return {product.id: product.website_price / add_qty for product in products}
 
     # ------------------------------------------------------
     # Edit

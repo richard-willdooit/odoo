@@ -20,7 +20,7 @@ from odoo.addons import decimal_precision as dp
 class SaleOrder(models.Model):
     _name = "sale.order"
     _inherit = ['mail.thread', 'mail.activity.mixin', 'portal.mixin']
-    _description = "Sales Order"
+    _description = "Quotation"
     _order = 'date_order desc, id desc'
 
     @api.depends('order_line.price_total')
@@ -128,6 +128,7 @@ class SaleOrder(models.Model):
     date_order = fields.Datetime(string='Order Date', required=True, readonly=True, index=True, states={'draft': [('readonly', False)], 'sent': [('readonly', False)]}, copy=False, default=fields.Datetime.now)
     validity_date = fields.Date(string='Expiration Date', readonly=True, copy=False, states={'draft': [('readonly', False)], 'sent': [('readonly', False)]},
         help="Manually set the expiration date of your quotation (offer), or it will set the date automatically based on the template if online quotation is installed.")
+    is_expired = fields.Boolean(compute='_compute_is_expired', string="Is expired")
     create_date = fields.Datetime(string='Creation Date', readonly=True, index=True, help="Date on which sales order is created.")
     confirmation_date = fields.Datetime(string='Confirmation Date', readonly=True, index=True, help="Date on which the sales order is confirmed.", oldname="date_confirm")
     user_id = fields.Many2one('res.users', string='Salesperson', index=True, track_visibility='onchange', default=lambda self: self.env.user)
@@ -168,13 +169,17 @@ class SaleOrder(models.Model):
         for order in self:
             order.portal_url = '/my/orders/%s' % (order.id)
 
+    def _compute_is_expired(self):
+        now = datetime.now()
+        for order in self:
+            if order.validity_date and fields.Datetime.from_string(order.validity_date) < now:
+                order.is_expired = True
+            else:
+                order.is_expired = False
+
     @api.model
     def _get_customer_lead(self, product_tmpl_id):
         return False
-
-    @api.multi
-    def button_dummy(self):
-        return True
 
     @api.multi
     def unlink(self):
@@ -802,11 +807,7 @@ class SaleOrderLine(models.Model):
         orders = self.mapped('order_id')
         for order in orders:
             order_lines = self.filtered(lambda x: x.order_id == order)
-            msg = ""
-            if any([values['product_uom_qty'] < x.product_uom_qty for x in order_lines]):
-                msg += "<b>" + _(
-                    'The ordered quantity has been decreased. Do not forget to take it into account on your invoices and delivery orders.') + '</b>'
-            msg += "<ul>"
+            msg = "<b>The ordered quantity has been updated.</b><ul>"
             for line in order_lines:
                 msg += "<li> %s:" % (line.product_id.display_name,)
                 msg += "<br/>" + _("Ordered Quantity") + ": %s -> %s <br/>" % (
@@ -819,11 +820,8 @@ class SaleOrderLine(models.Model):
 
     @api.multi
     def write(self, values):
-        lines = False
         if 'product_uom_qty' in values:
             precision = self.env['decimal.precision'].precision_get('Product Unit of Measure')
-            lines = self.filtered(
-                lambda r: r.state == 'sale' and float_compare(r.product_uom_qty, values['product_uom_qty'], precision_digits=precision) == -1)
             self.filtered(
                 lambda r: r.state == 'sale' and float_compare(r.product_uom_qty, values['product_uom_qty'], precision_digits=precision) != 0)._update_line_quantity(values)
         result = super(SaleOrderLine, self).write(values)
@@ -1012,7 +1010,7 @@ class SaleOrderLine(models.Model):
         self._compute_tax_id()
 
         if self.order_id.pricelist_id and self.order_id.partner_id:
-            vals['price_unit'] = self.env['account.tax']._fix_tax_included_price(self._get_display_price(product), product.taxes_id, self.tax_id)
+            vals['price_unit'] = self.env['account.tax']._fix_tax_included_price_company(self._get_display_price(product), product.taxes_id, self.tax_id, self.company_id)
         self.update(vals)
 
         return result
@@ -1032,7 +1030,28 @@ class SaleOrderLine(models.Model):
                 uom=self.product_uom.id,
                 fiscal_position=self.env.context.get('fiscal_position')
             )
-            self.price_unit = self.env['account.tax']._fix_tax_included_price(self._get_display_price(product), product.taxes_id, self.tax_id)
+            self.price_unit = self.env['account.tax']._fix_tax_included_price_company(self._get_display_price(product), product.taxes_id, self.tax_id, self.company_id)
+
+    @api.multi
+    def name_get(self):
+        if self._context.get('sale_show_order_product_name'):
+            result = []
+            for so_line in self:
+                name = '%s - %s' % (so_line.order_id.name, so_line.product_id.name)
+                result.append((so_line.id, name))
+            return result
+        return super(SaleOrderLine, self).name_get()
+
+    @api.model
+    def name_search(self, name='', args=None, operator='ilike', limit=100):
+        if self._context.get('sale_show_order_product_name'):
+            if operator in ('ilike', 'like', '=', '=like', '=ilike'):
+                domain = expression.AND([
+                    args or [],
+                    ['|', ('order_id.name', operator, name), ('product_id.name', operator, name)]
+                ])
+                return self.search(domain, limit=limit).name_get()
+        return super(SaleOrderLine, self).name_search(name, args, operator, limit)
 
     @api.multi
     def unlink(self):
@@ -1108,7 +1127,7 @@ class SaleOrderLine(models.Model):
 
         price, rule_id = self.order_id.pricelist_id.with_context(pricelist_context).get_product_price_rule(self.product_id, self.product_uom_qty or 1.0, self.order_id.partner_id)
         new_list_price, currency_id = self.with_context(context_partner)._get_real_price_currency(self.product_id, rule_id, self.product_uom_qty, self.product_uom, self.order_id.pricelist_id.id)
-        new_list_price = self.env['account.tax']._fix_tax_included_price(new_list_price, self.product_id.taxes_id, self.tax_id)
+        new_list_price = self.env['account.tax']._fix_tax_included_price_company(new_list_price, self.product_id.taxes_id, self.tax_id, self.company_id)
 
         if new_list_price != 0:
             if self.product_id.company_id and self.order_id.pricelist_id.currency_id != self.product_id.company_id.currency_id:

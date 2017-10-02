@@ -22,8 +22,6 @@ var StatementRenderer = Widget.extend(FieldManagerMixin, {
         'click div:first h1.statement_name': '_onClickStatementName',
         'click div:first h1.statement_name_edition button': '_onValidateName',
         "click *[rel='do_action']": "_onDoAction",
-        'click button.button_back_to_statement': '_onGoToBankStatement',
-        'click button.button_close_statement': '_onCloseBankStatement',
         'click button.js_load_more': '_onLoadMore',
     },
     /**
@@ -104,6 +102,7 @@ var StatementRenderer = Widget.extend(FieldManagerMixin, {
      * @param {[object]} [state.notifications]
      */
     update: function (state) {
+        var self = this;
         this.$progress.find('.valuenow').text(state.valuenow);
         this.$progress.find('.valuemax').text(state.valuemax);
         this.$progress.find('.progress-bar')
@@ -119,6 +118,8 @@ var StatementRenderer = Widget.extend(FieldManagerMixin, {
                 'timePerTransaction': Math.round(dt/1000/state.valuemax),
                 'context': state.context,
             }));
+            $done.find('.button_close_statement').click(this._onCloseBankStatement.bind(this));
+            $done.find('.button_back_to_statement').click(this._onGoToBankStatement.bind(this));
             this.$el.children().hide();
             // display rainbowman after full reconciliation
             this.trigger_up('show_effect', {
@@ -607,6 +608,10 @@ var LineRenderer = Widget.extend(FieldManagerMixin, {
      * @param {keyup event} event
      */
     _onInputKeyup: function (event) {
+        var target_partner_id = $(event.target).parents('[name="partner_id"]');
+        if (target_partner_id.length === 1) {
+            return;
+        }
         if(event.keyCode === 13) {
             if (_.findWhere(this.model.lines, {mode: 'create'}).balance.amount) {
                 this._onCreateProposition();

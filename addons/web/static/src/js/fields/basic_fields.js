@@ -348,6 +348,49 @@ var FieldChar = InputField.extend(TranslatableFieldMixin, {
     },
 });
 
+
+var LinkButton = AbstractField.extend({
+    events: _.extend({}, AbstractField.prototype.events, {
+        'click': '_onClick'
+    }),
+    //--------------------------------------------------------------------------
+    // Private
+    //--------------------------------------------------------------------------
+
+    /**
+     * Display button
+     * @override
+     * @private
+     */
+    _render: function () {
+        if (this.value) {
+            var className = this.attrs.icon || 'fa-globe';
+
+            this.$el.html("<span />");
+            this.$el.addClass("fa "+ className);
+            this.$el.attr('title', this.value);
+        }
+    },
+
+    //--------------------------------------------------------------------------
+    // Handlers
+    //--------------------------------------------------------------------------
+
+    /**
+     * Open link button
+     *
+     * @private
+     * @param {MouseEvent} event
+     */
+    _onClick: function (event) {
+        event.stopPropagation();
+        window.open(this.value, '_blank');
+    },
+
+});
+
+
+
 var FieldDate = InputField.extend({
     className: "o_field_date",
     tagName: "span",
@@ -951,6 +994,10 @@ var FieldPhone = FieldEmail.extend({
         } else {
             this.$el.removeClass('o_form_uri');
         }
+        // This class should technically be there in case of a very very long
+        // phone number, but it breaks the o_row mechanism, which is more
+        // important right now.
+        this.$el.removeClass('o_text_overflow');
     },
 
     /**
@@ -1006,7 +1053,7 @@ var UrlWidget = InputField.extend({
      * @private
      */
     _renderReadonly: function () {
-        this.$el.text(this.value)
+        this.$el.text(this.attrs.text || this.value)
             .addClass('o_form_uri o_text_overflow')
             .attr('href', this.value);
     }
@@ -2391,6 +2438,56 @@ var AceEditor = DebouncedField.extend({
     },
 });
 
+var ImageSelection = AbstractField.extend({
+    supportedFieldTypes: ['selection'],
+    events: _.extend({}, AbstractField.prototype.events, {
+        'click img': '_onImgClicked',
+    }),
+
+    //--------------------------------------------------------------------------
+    // Private
+    //--------------------------------------------------------------------------
+
+    /**
+     * @override
+     * @private
+     */
+    _render: function () {
+        var self = this;
+        this.$el.empty();
+        _.each(this.nodeOptions, function (val, key) {
+            var $container = $('<div>').addClass('col-xs-3 text-center');
+            var $img = $('<img>')
+                .addClass('img img-responsive img-thumbnail ml16')
+                .toggleClass('btn-info', key === self.value)
+                .attr('src', val.image_link)
+                .data('key', key);
+            $container.append($img);
+            if (val.preview_link) {
+                var $previewLink = $('<a>')
+                    .text('Preview')
+                    .attr('href', val.preview_link)
+                    .attr('target', '_blank');
+                $container.append($previewLink);
+            }
+            self.$el.append($container);
+        });
+    },
+
+    //--------------------------------------------------------------------------
+    // Handlers
+    //--------------------------------------------------------------------------
+
+    /**
+     * @override
+     * @private
+     * @param {MouseEvent} event
+     */
+    _onImgClicked: function (event) {
+        this._setValue($(event.currentTarget).data('key'));
+    },
+});
+
 return {
     TranslatableFieldMixin: TranslatableFieldMixin,
     DebouncedField: DebouncedField,
@@ -2401,6 +2498,7 @@ return {
     FieldBooleanButton: FieldBooleanButton,
     BooleanToggle: BooleanToggle,
     FieldChar: FieldChar,
+    LinkButton: LinkButton,
     FieldDate: FieldDate,
     FieldDateTime: FieldDateTime,
     FieldDomain: FieldDomain,
@@ -2416,6 +2514,7 @@ return {
     HandleWidget: HandleWidget,
     InputField: InputField,
     AttachmentImage: AttachmentImage,
+    ImageSelection: ImageSelection,
     LabelSelection: LabelSelection,
     StateSelectionWidget: StateSelectionWidget,
     FavoriteWidget: FavoriteWidget,

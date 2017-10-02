@@ -28,7 +28,6 @@ var ViewManager = Widget.extend(ControlPanelMixin, {
             _.extend(this.env, this._process_search_data(d.domains, d.contexts, d.groupbys));
             this.active_view.controller.reload(_.extend({offset: 0}, this.env));
         },
-        add_filter: '_onAddFilter',
         switch_view: function(event) {
             if ('res_id' in event.data) {
                 this.env.currentId = event.data.res_id;
@@ -294,12 +293,7 @@ var ViewManager = Widget.extend(ControlPanelMixin, {
                 }).fail(view.loaded.reject.bind(view.loaded));
             } else {
                 view.loaded = view.loaded.then(function() {
-                    // By default, the view will be loaded in readonly mode
-                    // Returns to this default mode if you load action from breadcrumb
                     view_options = _.extend({}, view_options, self.env);
-                    if (view_type === 'form') {
-                        view_options.mode = view_options.mode || 'readonly';
-                    }
                     return view.controller.reload(view_options);
                 });
             }
@@ -364,7 +358,7 @@ var ViewManager = Widget.extend(ControlPanelMixin, {
         var arch = view_descr.fields_view.arch;
         var View = this.registry.get(arch.attrs.js_class || view_descr.type);
         var params = _.extend({}, view_options, {userContext: this.getSession().user_context});
-        if (view_descr.type === "form" && ((this.action.target === 'new' || this.action.target === 'inline') ||
+        if (view_descr.type === "form" && ((this.action.target === 'new' || this.action.target === 'inline' || this.action.target === 'fullscreen') ||
             (view_options && (view_options.mode === 'edit' || view_options.context.form_view_initial_mode)))) {
             params.mode = params.initial_mode || 'edit';
         }
@@ -384,8 +378,14 @@ var ViewManager = Widget.extend(ControlPanelMixin, {
         });
     },
     select_view: function (index) {
-        var view_type = this.view_stack[index].type;
-        return this.switch_mode(view_type);
+        var viewType = this.view_stack[index].type;
+        var viewOptions = {};
+        if (viewType === 'form') {
+            // reload form views in readonly, except for inline actions (i.e.
+            // settings views) that stay in edit
+            viewOptions.mode = this.action.target === 'inline' ? 'edit' : 'readonly';
+        }
+        return this.switch_mode(viewType, viewOptions);
     },
     /**
      * Renders the switch buttons for multi- and mono-record views and adds
@@ -651,14 +651,6 @@ var ViewManager = Widget.extend(ControlPanelMixin, {
     // Handlers
     //--------------------------------------------------------------------------
 
-    /**
-     * @private
-     */
-    _onAddFilter: function (event) {
-        if (this.searchview) {
-            this.searchview.addFilter(event.data.domain, event.data.help);
-        }
-    },
     /**
      * This handler is probably called by a sub form view when the user discards
      * its value.  The usual result of this is that we switch back to the

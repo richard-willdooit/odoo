@@ -19,7 +19,7 @@ return Widget.extend({
         escape_pressed: '_onEscapePressed'
     },
     events: {
-        "click .o_chat_composer": "focus_input", // focus even if jquery's blockUI is enabled
+        'click .o_chat_composer': '_onComposerClick',
         "click .o_mail_thread": "_onChatWindowClicked",
         "keydown .o_chat_composer": "on_keydown",
         "keypress .o_chat_composer": "on_keypress",
@@ -43,7 +43,7 @@ return Widget.extend({
         this.status = this.options.status;
         this.unread_msgs = unread_msgs || 0;
         this.is_hidden = false;
-        this.isMobile = config.isMobile;
+        this.isMobile = config.device.isMobile;
     },
     start: function () {
         this.$input = this.$('.o_composer_text_field');
@@ -63,7 +63,7 @@ return Widget.extend({
         } else if (this.options.autofocus) {
             this.focus_input();
         }
-        if (!config.isMobile) {
+        if (!config.device.isMobile) {
             this.$el.css('margin-right', $.position.scrollbarWidth());
         }
         var def = this.thread.replace(this.$('.o_chat_content'));
@@ -103,9 +103,10 @@ return Widget.extend({
         this.fold();
     },
     focus_input: function () {
-        if (!config.device.touch) {
-            this.$input.focus();
+        if (config.device.touch && config.device.size_class <= config.device.SIZES.SM) {
+            return;
         }
+        this.$input.focus();
     },
     do_show: function () {
         this.is_hidden = false;
@@ -165,6 +166,19 @@ return Widget.extend({
         if (selectObj.anchorOffset === selectObj.focusOffset) {
             this.$input.focus();
         }
+    },
+    /**
+     * Called when the composer is clicked -> forces focus on input even if
+     * jquery's blockUI is enabled.
+     *
+     * @private
+     * @param {Event} ev
+     */
+    _onComposerClick: function (ev) {
+        if ($(ev.target).closest('a, button').length) {
+            return;
+        }
+        this.focus_input();
     },
     /**
      * @private

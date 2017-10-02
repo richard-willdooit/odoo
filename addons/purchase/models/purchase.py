@@ -580,6 +580,12 @@ class PurchaseOrderLine(models.Model):
 
     @api.multi
     def write(self, values):
+        if 'product_qty' in values:
+            for line in self:
+                if line.order_id.state == 'purchase':
+                    line.order_id.message_post_with_view('purchase.track_po_line_template',
+                                                         values={'line': line, 'product_qty': values['product_qty']},
+                                                         subtype_id=self.env.ref('mail.mt_note').id)
         result = super(PurchaseOrderLine, self).write(values)
         # Update expected date of corresponding moves
         if 'date_planned' in values:
@@ -825,7 +831,7 @@ class PurchaseOrderLine(models.Model):
         if not seller:
             return
 
-        price_unit = self.env['account.tax']._fix_tax_included_price(seller.price, self.product_id.supplier_taxes_id, self.taxes_id) if seller else 0.0
+        price_unit = self.env['account.tax']._fix_tax_included_price_company(seller.price, self.product_id.supplier_taxes_id, self.taxes_id, self.company_id) if seller else 0.0
         if price_unit and seller and self.order_id.currency_id and seller.currency_id != self.order_id.currency_id:
             price_unit = seller.currency_id.compute(price_unit, self.order_id.currency_id)
 
@@ -908,7 +914,7 @@ class ProcurementRule(models.Model):
                         date=po.date_order and po.date_order[:10],
                         uom_id=product_id.uom_po_id)
 
-                    price_unit = self.env['account.tax']._fix_tax_included_price(seller.price, line.product_id.supplier_taxes_id, line.taxes_id) if seller else 0.0
+                    price_unit = self.env['account.tax']._fix_tax_included_price_company(seller.price, line.product_id.supplier_taxes_id, line.taxes_id, values['company_id']) if seller else 0.0
                     if price_unit and seller and po.currency_id and seller.currency_id != po.currency_id:
                         price_unit = seller.currency_id.compute(price_unit, po.currency_id)
 
@@ -955,7 +961,7 @@ class ProcurementRule(models.Model):
         if taxes_id:
             taxes_id = taxes_id.filtered(lambda x: x.company_id.id == values['company_id'].id)
 
-        price_unit = self.env['account.tax']._fix_tax_included_price(seller.price, product_id.supplier_taxes_id, taxes_id) if seller else 0.0
+        price_unit = self.env['account.tax']._fix_tax_included_price_company(seller.price, product_id.supplier_taxes_id, taxes_id, values['company_id']) if seller else 0.0
         if price_unit and seller and po.currency_id and seller.currency_id != po.currency_id:
             price_unit = seller.currency_id.compute(price_unit, po.currency_id)
 

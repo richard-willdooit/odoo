@@ -12,6 +12,7 @@ odoo.define('web.EditableListRenderer', function (require) {
  * view. It uses the same widgets, but the code is totally stand alone.
  */
 var core = require('web.core');
+var dom = require('web.dom');
 var ListRenderer = require('web.ListRenderer');
 var utils = require('web.utils');
 
@@ -47,6 +48,7 @@ ListRenderer.include({
 
         this.currentRow = null;
         this.currentCol = null;
+        this.currentFieldIndex = null;
     },
     /**
      * @override
@@ -105,6 +107,85 @@ ListRenderer.include({
         });
     },
     /**
+     * This is a specialized version of confirmChange, meant to be called when
+     * the change may have affected more than one line (so, for example, an
+     * onchange which add/remove a few lines in a x2many.  This does not occur
+     * in a normal list view)
+     *
+     * The update is more difficult when other rows could have been changed. We
+     * need to potentially remove some lines, add some other lines, update some
+     * other lines and maybe reorder a few of them.  This problem would neatly
+     * be solved by using a virtual dom, but we do not have this luxury yet.
+     * So, in the meantime, what we do is basically remove every current row
+     * except the 'main' one (the row which caused the update), then rerender
+     * every new row and add them before/after the main one.
+     *
+     * @param {Object} state
+     * @param {string} id
+     * @param {string[]} fields
+     * @param {OdooEvent} ev
+     * @returns {Deferred<AbstractField[]>} resolved with the list of widgets
+     *                                      that have been reset
+     */
+    confirmUpdate: function (state, id, fields, ev) {
+        var self = this;
+
+        // store the cursor position to restore it once potential onchanges have
+        // been applied
+        var currentRowID, currentWidget, focusedElement, selectionRange;
+        if (self.currentRow !== null) {
+            currentRowID = this.state.data[this.currentRow].id;
+            currentWidget = this.allFieldWidgets[currentRowID][this.currentFieldIndex];
+            focusedElement = currentWidget.getFocusableElement().get(0);
+            selectionRange = dom.getSelectionRange(focusedElement);
+        }
+
+        var oldData = this.state.data;
+        this.state = state;
+        return this.confirmChange(state, id, fields, ev).then(function () {
+            // If no record with 'id' can be found in the state, the
+            // confirmChange method will have rerendered the whole view already,
+            // so no further work is necessary.
+            var record = _.findWhere(state.data, {id: id});
+            if (!record) {
+                return;
+            }
+            var oldRowIndex = _.findIndex(oldData, {id: id});
+            var $row = self.$('.o_data_row:nth(' + oldRowIndex + ')');
+            $row.nextAll('.o_data_row').remove();
+            $row.prevAll().remove();
+            _.each(oldData, function (rec) {
+                if (rec.id !== id) {
+                    self._destroyFieldWidgets(rec.id);
+                }
+            });
+            var newRowIndex = _.findIndex(state.data, {id: id});
+            var $lastRow = $row;
+            _.each(state.data, function (record, index) {
+                if (index === newRowIndex) {
+                    return;
+                }
+                var $newRow = self._renderRow(record);
+                if (index < newRowIndex) {
+                    $newRow.insertBefore($row);
+                } else {
+                    $newRow.insertAfter($lastRow);
+                    $lastRow = $newRow;
+                }
+            });
+            if (self.currentRow !== null) {
+                self.currentRow = newRowIndex;
+                return self._selectCell(newRowIndex, self.currentCol, {force: true}).then(function () {
+                    // restore the cursor position
+                    currentRowID = self.state.data[newRowIndex].id;
+                    currentWidget = self.allFieldWidgets[currentRowID][self.currentFieldIndex];
+                    focusedElement = currentWidget.getFocusableElement().get(0);
+                    dom.setSelectionRange(focusedElement, selectionRange);
+                });
+            }
+        });
+    },
+    /**
      * Edit a given record in the list
      *
      * @param {string} recordID
@@ -133,6 +214,7 @@ ListRenderer.include({
      * @param {string} recordID
      */
     removeLine: function (state, recordID) {
+        var self = this;
         var rowIndex = _.findIndex(this.state.data, {id: recordID});
         this.state = state;
         if (rowIndex === -1) {
@@ -141,8 +223,16 @@ ListRenderer.include({
         if (rowIndex === this.currentRow) {
             this.currentRow = null;
         }
+
+        // remove the row
         var $row = this.$('.o_data_row:nth(' + rowIndex + ')');
-        $row.remove();
+        if (this.state.count >= 4) {
+            $row.remove();
+        } else {
+            $row.replaceWith(this._renderEmptyRow());
+        }
+
+        this._destroyFieldWidgets(recordID);
     },
     /**
      * Updates the already rendered row associated to the given recordID so that
@@ -221,7 +311,7 @@ ListRenderer.include({
             // destroyed. This is not the case for simple buttons so we have to
             // do it here.
             if ($td.hasClass('o_list_button')) {
-                self._unregisterModifiersElement(node, record, $td.children());
+                self._unregisterModifiersElement(node, recordID, $td.children());
             }
 
             // For edit mode we only replace the content of the cell with its
@@ -231,14 +321,14 @@ ListRenderer.include({
             if (editMode) {
                 $td.empty().append($newTd.contents());
             } else {
-                self._unregisterModifiersElement(node, record, $td);
+                self._unregisterModifiersElement(node, recordID, $td);
                 $td.replaceWith($newTd);
             }
         });
         delete this.defs;
 
         // Destroy old field widgets
-        _.each(oldWidgets, this._destroyFieldWidget.bind(this, record));
+        _.each(oldWidgets, this._destroyFieldWidget.bind(this, recordID));
 
         // Toggle selected class here so that style is applied at the end
         $row.toggleClass('o_selected_row', editMode);
@@ -288,6 +378,19 @@ ListRenderer.include({
     // Private
     //--------------------------------------------------------------------------
 
+    /**
+     * Destroy all field widgets corresponding to a record.  Useful when we are
+     * removing a useless row.
+     *
+     * @param {string} recordID
+     */
+    _destroyFieldWidgets: function (recordID) {
+        if (recordID in this.allFieldWidgets) {
+            var widgetsToDestroy = this.allFieldWidgets[recordID].slice();
+            _.each(widgetsToDestroy, this._destroyFieldWidget.bind(this, recordID));
+            delete this.allFieldWidgets[recordID];
+        }
+    },
     /**
      * Returns the current number of columns.  The editable renderer may add a
      * trash icon on the right of a record, so we need to take this into account
@@ -356,6 +459,7 @@ ListRenderer.include({
     _render: function () {
         this.currentRow = null;
         this.currentCol = null;
+        this.currentFieldIndex = null;
         return this._super.apply(this, arguments);
     },
     /**
@@ -463,14 +567,18 @@ ListRenderer.include({
      *   triggered the cell selection
      *   selected from the colIndex to the last column, then we wrap around and
      *   try to select a widget starting from the beginning
+     * @param {boolean} [options.force=false] if true, force selecting the cell
+     *   even if seems to be already the selected one (useful after a re-
+     *   rendering, to reset the focus on the correct field)
      * @return {Deferred} fails if no cell could be selected
      */
     _selectCell: function (rowIndex, colIndex, options) {
+        options = options || {};
         // Do nothing if the user tries to select current cell
-        if (rowIndex === this.currentRow && colIndex === this.currentCol) {
+        if (!options.force && rowIndex === this.currentRow && colIndex === this.currentCol) {
             return $.when();
         }
-        var wrap = (!options || options.wrap === undefined) ? true : options.wrap;
+        var wrap = options.wrap === undefined ? true : options.wrap;
 
         // Select the row then activate the widget in the correct cell
         var self = this;
@@ -491,6 +599,7 @@ ListRenderer.include({
             }
 
             self.currentCol = fieldIndex + getNbButtonBefore(fieldIndex);
+            self.currentFieldIndex = fieldIndex;
 
             function getNbButtonBefore(index) {
                 var nbButtons = 0;
@@ -518,6 +627,12 @@ ListRenderer.include({
         // To select a row, the currently selected one must be unselected first
         var self = this;
         return this.unselectRow().then(function () {
+            if (self.state.data.length <= rowIndex) {
+                // The row to selected doesn't exist anymore (probably because
+                // an onchange triggered when unselecting the previous one
+                // removes rows)
+                return $.Deferred().reject();
+            }
             // Notify the controller we want to make a record editable
             var def = $.Deferred();
             self.trigger_up('edit_line', {
@@ -648,6 +763,9 @@ ListRenderer.include({
                 this._moveToNextLine();
                 break;
             case 'cancel':
+                // stop the original event (typically an ESCAPE keydown), to
+                // prevent from closing the potential dialog containing this list
+                ev.data.originalEvent.stopPropagation();
                 this.trigger_up('discard_changes', {
                     recordID: ev.target.dataPointID,
                 });
@@ -663,6 +781,17 @@ ListRenderer.include({
      */
     _onRowClicked: function () {
         if (!this._isEditable()) {
+            this._super.apply(this, arguments);
+        }
+    },
+    /**
+     * Overrides to prevent from sorting if we are currently editing a record.
+     *
+     * @override
+     * @private
+     */
+    _onSortColumn: function () {
+        if (this.currentRow === null) {
             this._super.apply(this, arguments);
         }
     },

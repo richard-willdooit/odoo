@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import api, fields, models, _
+from collections import Counter
 
+from odoo import api, fields, models, _
 from odoo.addons import decimal_precision as dp
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.pycompat import izip
@@ -47,6 +48,7 @@ class StockMoveLine(models.Model):
     is_locked = fields.Boolean(related='move_id.is_locked', default=True, readonly=True)
     consume_line_ids = fields.Many2many('stock.move.line', 'stock_move_line_consume_rel', 'consume_line_id', 'produce_line_id', help="Technical link to see who consumed what. ")
     produce_line_ids = fields.Many2many('stock.move.line', 'stock_move_line_consume_rel', 'produce_line_id', 'consume_line_id', help="Technical link to see which line was produced with this. ")
+    reference = fields.Char(related='move_id.reference', store=True)
 
     @api.one
     def _compute_location_description(self):
@@ -98,8 +100,57 @@ class StockMoveLine(models.Model):
 
     @api.onchange('lot_name', 'lot_id')
     def onchange_serial_number(self):
+        res = {}
         if self.product_id.tracking == 'serial':
             self.qty_done = 1
+            move_lines_to_check = self._get_similar_move_lines() - self
+            message = move_lines_to_check._check_for_duplicated_serial_numbers()
+            if message:
+                res['warning'] = {'title': _('Warning'), 'message': message}
+        return res
+
+    @api.constrains('lot_id', 'lot_name', 'qty_done')
+    def _check_unique_serial_number(self):
+        for ml in self.filtered(lambda ml: ml.move_id.product_id.tracking == 'serial' and (ml.lot_id or ml.lot_name)):
+            move_lines_to_check = ml._get_similar_move_lines()
+            message = move_lines_to_check._check_for_duplicated_serial_numbers()
+            if message:
+                raise ValidationError(message)
+            if float_compare(ml.qty_done, 1.0, precision_rounding=ml.move_id.product_id.uom_id.rounding) == 1:
+                raise UserError(_(
+                    'You can only process 1.0 %s for products with unique serial number.') % ml.product_id.uom_id.name)
+            if ml.lot_name:
+                already_exist = self.env['stock.production.lot'].search(
+                    [('name', '=', ml.lot_name), ('product_id', '=', ml.product_id.id)])
+                if already_exist:
+                    return _('You have already assigned this serial number to this product. Please correct the serial numbers encoded.')
+
+    def _get_similar_move_lines(self):
+        self.ensure_one()
+        lines = self.env['stock.move.line']
+        picking_id = self.move_id.picking_id if self.move_id else self.picking_id
+        if picking_id:
+            lines |= picking_id.move_line_ids.filtered(lambda ml: ml.product_id == self.product_id and (ml.lot_id or ml.lot_name))
+        return lines
+
+    def _check_for_duplicated_serial_numbers(self):
+        """ This method is used in _check_unique_serial_number and in onchange_serial_number to check that a same serial number is not used twice amongst the recordset passed.
+
+        :return: an error message directed to the user if needed else False
+        """
+        if self.mapped('lot_id'):
+            lots_map = [(ml.product_id.id, ml.lot_id.name) for ml in self]
+            recorded_serials_counter = Counter(lots_map)
+            for (product_id, lot_id), occurrences in recorded_serials_counter.items():
+                if occurrences > 1 and lot_id is not False:
+                    return _('You cannot use the same serial number twice. Please correct the serial numbers encoded.')
+        elif self.mapped('lot_name'):
+            lots_map = [(ml.product_id.id, ml.lot_name) for ml in self]
+            recorded_serials_counter = Counter(lots_map)
+            for (product_id, lot_id), occurrences in recorded_serials_counter.items():
+                if occurrences > 1 and lot_id is not False:
+                    return _('You cannot use the same serial number twice. Please correct the serial numbers encoded.')
+        return False
 
     @api.model
     def create(self, vals):
@@ -197,9 +248,10 @@ class StockMoveLine(models.Model):
         if updates or 'qty_done' in vals:
             for ml in self.filtered(lambda ml: ml.move_id.state == 'done' and ml.product_id.type == 'product'):
                 # undo the original move line
-                in_date = Quant._update_available_quantity(ml.product_id, ml.location_dest_id, -ml.qty_done, lot_id=ml.lot_id,
-                                                      package_id=ml.package_id, owner_id=ml.owner_id)[1]
-                Quant._update_available_quantity(ml.product_id, ml.location_id, ml.qty_done, lot_id=ml.lot_id,
+                qty_done_orig = ml.move_id.product_uom._compute_quantity(ml.qty_done, ml.move_id.product_id.uom_id, rounding_method='HALF-UP')
+                in_date = Quant._update_available_quantity(ml.product_id, ml.location_dest_id, -qty_done_orig, lot_id=ml.lot_id,
+                                                      package_id=ml.result_package_id, owner_id=ml.owner_id)[1]
+                Quant._update_available_quantity(ml.product_id, ml.location_id, qty_done_orig, lot_id=ml.lot_id,
                                                       package_id=ml.package_id, owner_id=ml.owner_id, in_date=in_date)
 
                 # move what's been actually done
@@ -228,7 +280,18 @@ class StockMoveLine(models.Model):
                     Quant._update_available_quantity(product_id, location_dest_id, quantity, lot_id=lot_id, package_id=result_package_id, owner_id=owner_id, in_date=in_date)
                 # Unreserve and reserve following move in order to have the real reserved quantity on move_line.
                 next_moves |= ml.move_id.move_dest_ids.filtered(lambda move: move.state not in ('done', 'cancel'))
+
+                # Log a note
+                if ml.picking_id:
+                    ml._log_message(ml.picking_id, ml, 'stock.track_move_template', vals)
+
         res = super(StockMoveLine, self).write(vals)
+
+        # Update scrap object linked to move_lines to the new quantity.
+        if 'qty_done' in vals:
+            for move in self.mapped('move_id'):
+                if move.scrapped:
+                    move.scrap_ids.write({'scrap_qty': move.quantity_done})
 
         # As stock_account values according to a move's `product_uom_qty`, we consider that any
         # done stock move should have its `quantity_done` equals to its `product_uom_qty`, and
@@ -331,6 +394,22 @@ class StockMoveLine(models.Model):
                 Quant._update_available_quantity(ml.product_id, ml.location_dest_id, quantity, lot_id=ml.lot_id, package_id=ml.result_package_id, owner_id=ml.owner_id, in_date=in_date)
         # Reset the reserved quantity as we just moved it to the destination location.
         (self - ml_to_delete).with_context(bypass_reservation_update=True).write({'product_uom_qty': 0.00})
+
+    def _log_message(self, record, move, template, vals):
+        data = vals.copy()
+        if 'lot_id' in vals and vals['lot_id'] != move.lot_id.id:
+            data['lot_name'] = self.env['stock.production.lot'].browse(vals.get('lot_id')).name
+        if 'location_id' in vals:
+            data['location_name'] = self.env['stock.location_id'].browse(vals.get('location_id')).name
+        if 'location_dest_id' in vals:
+            data['location_dest_name'] = self.env['stock.location_id'].browse(vals.get('location_dest_id')).name
+        if 'package_id' in vals and vals['package_id'] != move.package_id.id:
+            data['package_name'] = self.env['stock.quant.package'].browse(vals.get('package_id')).name
+        if 'package_result_id' in vals and vals['package_result_id'] != move.package_result_id.id:
+            data['result_package_name'] = self.env['stock.quant.package'].browse(vals.get('result_package_id')).name
+        if 'owner_id' in vals and vals['owner_id'] != move.owner_id.id:
+            data['owner_name'] = self.env['res.partner'].browse(vals.get('owner_id')).name
+        record.message_post_with_view(template, values={'move': move, 'vals': dict(vals, **data)}, subtype_id=self.env.ref('mail.mt_note').id)
 
     def _free_reservation(self, product_id, location_id, quantity, lot_id=None, package_id=None, owner_id=None):
         """ When editing a done move line or validating one with some forced quantities, it is

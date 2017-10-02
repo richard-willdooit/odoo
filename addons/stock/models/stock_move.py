@@ -154,8 +154,17 @@ class StockMove(models.Model):
     picking_code = fields.Selection(related='picking_id.picking_type_id.code', readonly=True)
     product_type = fields.Selection(related='product_id.type', readonly=True)
     additional = fields.Boolean("Whether the move was added after the picking's confirmation", default=False)
-    is_locked = fields.Boolean(related='picking_id.is_locked', readonly=True)
+    is_locked = fields.Boolean(compute='_compute_is_locked', readonly=True)
     is_initial_demand_editable = fields.Boolean('Is initial demand editable', compute='_compute_is_initial_demand_editable')
+    is_quantity_done_editable = fields.Boolean('Is quantity done editable', compute='_compute_is_quantity_done_editable')
+    reference = fields.Char(compute='_compute_reference', string="Reference", store=True)
+
+    @api.depends('picking_id.is_locked')
+    def _compute_is_locked(self):
+        for move in self:
+            if move.picking_id:
+                move.is_locked = move.picking_id.is_locked
+
 
     @api.depends('product_id', 'has_tracking', 'move_line_ids', 'location_id', 'location_dest_id')
     def _compute_show_details_visible(self):
@@ -189,12 +198,28 @@ class StockMove(models.Model):
     @api.depends('state', 'picking_id')
     def _compute_is_initial_demand_editable(self):
         for move in self:
-            if move.state == 'draft':
+            if self._context.get('planned_picking'):
                 move.is_initial_demand_editable = True
-            elif move.state != 'done' and move.picking_id and not move.picking_id.is_locked:
+            elif not move.picking_id.is_locked and move.state != 'done' and move.picking_id:
                 move.is_initial_demand_editable = True
             else:
                 move.is_initial_demand_editable = False
+
+    @api.multi
+    @api.depends('state', 'picking_id')
+    def _compute_is_quantity_done_editable(self):
+        for move in self:
+            if self._context.get('planned_picking') and move.picking_id.state == 'draft':
+                move.is_quantity_done_editable = False
+            elif move.picking_id.is_locked and move.state in ('done', 'cancel'):
+                move.is_quantity_done_editable = False
+            else:
+                move.is_quantity_done_editable = True
+
+    @api.depends('picking_id', 'name')
+    def _compute_reference(self):
+        for move in self:
+            move.reference = move.picking_id.name if move.picking_id else move.name
 
     @api.one
     @api.depends('product_id', 'product_uom', 'product_uom_qty')
@@ -338,11 +363,18 @@ class StockMove(models.Model):
 
     def write(self, vals):
         # FIXME: pim fix your crap
-        if vals.get('product_uom_qty'):
+        receipt_moves_to_reassign = self.env['stock.move']
+        if 'product_uom_qty' in vals:
+            for move in self.filtered(lambda m: m.state not in ('done', 'draft') and m.picking_id):
+                if vals['product_uom_qty'] != move.product_uom_qty:
+                    self.env['stock.move.line']._log_message(move.picking_id, move, 'stock.track_move_template', vals)
             if self.env.context.get('do_not_unreserve') is None:
                 move_to_unreserve = self.filtered(lambda m: m.state not in ['draft', 'done', 'cancel'] and m.reserved_availability > vals.get('product_uom_qty'))
                 move_to_unreserve._do_unreserve()
                 (self - move_to_unreserve).filtered(lambda m: m.state == 'assigned').write({'state': 'partially_available'})
+                # When editing the initial demand, directly run again action assign on receipt moves.
+                receipt_moves_to_reassign |= move_to_unreserve.filtered(lambda m: m.location_id.usage == 'supplier')
+                receipt_moves_to_reassign |= (self - move_to_unreserve).filtered(lambda m: m.location_id.usage == 'supplier' and m.state in ('partially_available', 'assigned'))
 
         # TDE CLEANME: it is a gros bordel + tracking
         Picking = self.env['stock.picking']
@@ -386,6 +418,8 @@ class StockMove(models.Model):
         res = super(StockMove, self).write(vals)
         if track_pickings:
             pickings.message_track(pickings.fields_get(['state']), initial_values)
+        if receipt_moves_to_reassign:
+            receipt_moves_to_reassign._action_assign()
         return res
 
     def action_show_details(self):
@@ -482,11 +516,12 @@ class StockMove(models.Model):
         :return: Recordset of moves passed to this method. If some of the passed moves were merged
         into another existing one, return this one and not the (now unlinked) original.
         """
-        distinct_fields = ['price_unit', 'product_id', 'product_packaging',
+        distinct_fields = ['product_id', 'price_unit', 'product_packaging',
                            'product_uom', 'restrict_partner_id', 'scrapped', 'origin_returned_move_id']
 
         def _keys_sorted(move):
-            return tuple([getattr(move, attr) for attr in distinct_fields])
+            return move.product_id.id, move.price_unit, move.product_packaging.id, move.product_uom.id,\
+                   move.restrict_partner_id.id, move.scrapped, move.origin_returned_move_id.id
 
         # Move removed after merge
         moves_to_unlink = self.env['stock.move']
@@ -534,18 +569,24 @@ class StockMove(models.Model):
         }
         moves_todo = self\
             .filtered(lambda move: move.state not in ['cancel', 'done'])\
-            .sorted(key=lambda move: sort_map.get(move.state, 0))
+            .sorted(key=lambda move: (sort_map.get(move.state, 0), move.product_uom_qty))
         # The picking should be the same for all moves.
         if moves_todo[0].picking_id.move_type == 'one':
-            if moves_todo[0].state in ('partially_available', 'confirmed'):
+            most_important_move = moves_todo[0]
+            if most_important_move.state == 'confirmed':
+                return 'confirmed' if most_important_move.product_uom_qty else 'assigned'
+            elif most_important_move.state == 'partially_available':
                 return 'confirmed'
             else:
                 return moves_todo[0].state or 'draft'
         elif moves_todo[0].state != 'assigned' and any(move.state in ['assigned', 'partially_available'] for move in moves_todo):
             return 'partially_available'
         else:
-            # take the less important state among all move_lines.
-            return moves_todo[-1].state or 'draft'
+            least_important_move = moves_todo[-1]
+            if least_important_move.state == 'confirmed' and least_important_move.product_uom_qty == 0:
+                return 'assigned'
+            else:
+                return moves_todo[-1].state or 'draft'
 
     @api.onchange('product_id', 'product_qty')
     def onchange_quantity(self):
@@ -651,7 +692,7 @@ class StockMove(models.Model):
         # create procurements for make to order moves
         for move in move_create_proc:
             values = move._prepare_procurement_values()
-            origin = (move.group_id and (move.group_id.name + ":") or "") + (move.rule_id and move.rule_id.name or move.origin or move.picking_id.name or "/")
+            origin = (move.group_id and move.group_id.name or (move.rule_id and move.rule_id.name or move.origin or move.picking_id.name or "/"))
             self.env['procurement.group'].run(move.product_id, move.product_uom_qty, move.product_uom, move.location_id, move.rule_id and move.rule_id.name or "/", origin,
                                               values)
 
@@ -734,11 +775,21 @@ class StockMove(models.Model):
 
         taken_quantity = min(available_quantity, need)
 
+        quants = []
+        try:
+            quants = self.env['stock.quant']._update_reserved_quantity(
+                self.product_id, location_id, taken_quantity, lot_id=lot_id,
+                package_id=package_id, owner_id=owner_id, strict=strict
+            )
+        except UserError:
+            # If it raises here, it means that the `available_quantity` brought by a done move line
+            # is not available on the quants itself. This could be the result of an inventory
+            # adjustment that removed totally of partially `available_quantity`. When this happens, we
+            # chose to do nothing. This situation could not happen on MTS move, because in this case
+            # `available_quantity` is directly the quantity on the quants themselves.
+            taken_quantity = 0
+
         # Find a candidate move line to update or create a new one.
-        quants = self.env['stock.quant']._update_reserved_quantity(
-            self.product_id, location_id, taken_quantity, lot_id=lot_id,
-            package_id=package_id, owner_id=owner_id, strict=strict
-        )
         for reserved_quant, quantity in quants:
             to_update = self.move_line_ids.filtered(lambda m: m.location_id.id == reserved_quant.location_id.id and m.lot_id.id == reserved_quant.lot_id.id and m.package_id.id == reserved_quant.package_id.id and m.owner_id.id == reserved_quant.owner_id.id)
             if to_update:
@@ -888,7 +939,7 @@ class StockMove(models.Model):
         extra_move = self.env['stock.move']
         rounding = self.product_uom.rounding
         # moves created after the picking is assigned do not have `product_uom_qty`, but we shouldn't create extra moves for them
-        if self.product_uom_qty and float_compare(self.quantity_done, self.product_uom_qty, precision_rounding=rounding) > 0:
+        if float_compare(self.quantity_done, self.product_uom_qty, precision_rounding=rounding) > 0:
             # create the extra moves
             extra_move_quantity = float_round(
                 self.quantity_done - self.product_uom_qty,
@@ -896,6 +947,25 @@ class StockMove(models.Model):
                 rounding_method ='UP')
             extra_move_vals = self._prepare_extra_move_vals(extra_move_quantity)
             extra_move = self.copy(default=extra_move_vals)._action_confirm()
+
+            # link it to some move lines. We don't need to do it for move since they should be merged.
+            if self.exists() and not self.picking_id:
+                for move_line in self.move_line_ids.filtered(lambda ml: ml.qty_done):
+                    if float_compare(move_line.qty_done, extra_move_quantity, precision_rounding=rounding) <= 0:
+                        # move this move line to our extra move
+                        move_line.move_id = extra_move.id
+                        extra_move_quantity -= move_line.qty_done
+                    else:
+                        # split this move line and assign the new part to our extra move
+                        quantity_split = float_round(
+                            move_line.qty_done - extra_move_quantity,
+                            precision_rounding=self.product_uom.rounding,
+                            rounding_method='UP')
+                        move_line.qty_done = quantity_split
+                        move_line.copy(default={'move_id': extra_move.id, 'qty_done': extra_move_quantity, 'product_uom_qty': 0})
+                        extra_move_quantity -= extra_move_quantity
+                    if extra_move_quantity == 0.0:
+                        break
         return extra_move
 
     def _action_done(self):
@@ -914,6 +984,8 @@ class StockMove(models.Model):
             # rounding = move.product_uom.rounding
             # move.quantity_done = float_round(move.quantity_done, precision_rounding=rounding, rounding_method ='UP')
             if move.quantity_done <= 0:
+                if float_compare(move.product_uom_qty, 0.0, precision_rounding=move.product_uom.rounding) == 0:
+                    move._action_cancel()
                 continue
             moves_todo |= move
             moves_todo |= move._create_extra_move()
@@ -940,6 +1012,11 @@ class StockMove(models.Model):
         picking = self and self[0].picking_id or False
         moves_todo.write({'state': 'done', 'date': fields.Datetime.now()})
         moves_todo.mapped('move_dest_ids')._action_assign()
+
+        # We don't want to create back order for scrap moves
+        if all(move_todo.scrapped for move_todo in moves_todo):
+            return moves_todo
+
         if picking:
             moves_to_backorder = picking.move_lines.filtered(lambda x: x.state not in ('done', 'cancel'))
             if moves_to_backorder:
@@ -949,7 +1026,7 @@ class StockMove(models.Model):
                         'move_line_ids': [],
                         'backorder_id': picking.id
                     })
-                picking.message_post('Backorder Created') #message needs to be improved
+                picking.message_post(_('The backorder <a href=# data-oe-model=stock.picking data-oe-id=%d>%s</a> has been created.') % (backorder_picking.id, backorder_picking.name))
                 moves_to_backorder.write({'picking_id': backorder_picking.id})
                 moves_to_backorder.mapped('move_line_ids').write({'picking_id': backorder_picking.id})
             moves_to_backorder._action_assign()
@@ -958,6 +1035,8 @@ class StockMove(models.Model):
     def unlink(self):
         if any(move.state not in ('draft', 'cancel') for move in self):
             raise UserError(_('You can only delete draft moves.'))
+        # With the non plannified picking, draft moves could have some move lines.
+        self.mapped('move_line_ids').unlink()
         return super(StockMove, self).unlink()
 
     def _prepare_move_split_vals(self, uom_qty):

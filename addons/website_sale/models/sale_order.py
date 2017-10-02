@@ -97,7 +97,7 @@ class SaleOrder(models.Model):
         if order.pricelist_id and order.partner_id:
             order_line = order._cart_find_product_line(product.id)
             if order_line:
-                pu = self.env['account.tax']._fix_tax_included_price(pu, product.taxes_id, order_line[0].tax_id)
+                pu = self.env['account.tax']._fix_tax_included_price_company(pu, product.taxes_id, order_line[0].tax_id, self.company_id)
 
         return {
             'product_id': product_id,
@@ -185,10 +185,11 @@ class SaleOrder(models.Model):
                     'pricelist': order.pricelist_id.id,
                 })
                 product = self.env['product.product'].with_context(product_context).browse(product_id)
-                values['price_unit'] = self.env['account.tax']._fix_tax_included_price(
+                values['price_unit'] = self.env['account.tax']._fix_tax_included_price_company(
                     order_line._get_display_price(product),
                     order_line.product_id.taxes_id,
-                    order_line.tax_id
+                    order_line.tax_id,
+                    self.company_id
                 )
 
             order_line.write(values)
@@ -224,6 +225,7 @@ class SaleOrder(models.Model):
                 'default_model': 'sale.order',
                 'default_use_template': bool(template_id),
                 'default_template_id': template_id,
+                'website_sale_send_recovery_email': True,
                 'active_ids': self.ids,
             },
         }
@@ -243,19 +245,3 @@ class SaleOrder(models.Model):
             self.payment_tx_id.state = 'done'
         else:
             raise ValidationError(_("The quote should be sent and the payment acquirer type should be manual or wire transfer"))
-
-
-class ResCountry(models.Model):
-    _inherit = 'res.country'
-
-    def get_website_sale_countries(self, mode='billing'):
-        return self.sudo().search([])
-
-    def get_website_sale_states(self, mode='billing'):
-        return self.sudo().state_ids
-
-
-class ResPartner(models.Model):
-    _inherit = 'res.partner'
-
-    last_website_so_id = fields.Many2one('sale.order', string='Last Online Sales Order')

@@ -101,8 +101,9 @@ var BasicRenderer = AbstractRenderer.extend({
         // which are configured to always be reset on any change
         var resetWidgets = [];
         _.each(this.allFieldWidgets[id], function (widget) {
-            if (_.contains(fields, widget.name) || widget.resetOnAnyFieldChange) {
-                defs.push(widget.reset(record, ev));
+            var fieldChanged = _.contains(fields, widget.name);
+            if (fieldChanged || widget.resetOnAnyFieldChange) {
+                defs.push(widget.reset(record, ev, fieldChanged));
                 resetWidgets.push(widget);
             }
         });
@@ -127,7 +128,7 @@ var BasicRenderer = AbstractRenderer.extend({
         this.editRecord(id);
         if (typeof offset === "number") {
             var field = _.findWhere(this.allFieldWidgets[id], {name: fieldName});
-            dom.setCursor(field.getFocusableElement(), offset);
+            dom.setSelectionRange(field.getFocusableElement().get(0), {start: offset, end: offset});
         }
     },
 
@@ -288,18 +289,18 @@ var BasicRenderer = AbstractRenderer.extend({
      * from internal referencing.
      *
      * @private
-     * @param {Object} record
+     * @param {string} recordID id of the local resource
      * @param {AbstractField} widget
      * @returns {integer} the index of the removed widget
      */
-    _destroyFieldWidget: function (record, widget) {
-        var recordWidgets = this.allFieldWidgets[record.id];
+    _destroyFieldWidget: function (recordID, widget) {
+        var recordWidgets = this.allFieldWidgets[recordID];
         var index = recordWidgets.indexOf(widget);
         if (index >= 0) {
             recordWidgets.splice(index, 1);
         }
-        this._unregisterModifiersElement(widget.__node, record, widget);
-        widget.$el.destroy();
+        this._unregisterModifiersElement(widget.__node, recordID, widget);
+        widget.destroy();
         return index;
     },
     /**
@@ -406,7 +407,7 @@ var BasicRenderer = AbstractRenderer.extend({
         // If not, check the modifiers to see if it needs registration
         var modifiersData = this._getModifiersData(node);
         if (!modifiersData) {
-            var modifiers = JSON.parse(node.attrs.modifiers || "{}"); // FIXME parsed multiple times (record switching, no modifiers, ...)
+            var modifiers = node.attrs.modifiers || {};
             modifiersData = {
                 node: node,
                 modifiers: modifiers,
@@ -594,7 +595,7 @@ var BasicRenderer = AbstractRenderer.extend({
         widget.$el.replaceWith(newWidget.$el);
 
         // Destroy the old widget and position the new one at the old one's
-        var oldIndex = this._destroyFieldWidget(record, widget);
+        var oldIndex = this._destroyFieldWidget(record.id, widget);
         var recordWidgets = this.allFieldWidgets[record.id];
         recordWidgets.splice(oldIndex, 0, newWidget);
         recordWidgets.pop();
@@ -606,13 +607,13 @@ var BasicRenderer = AbstractRenderer.extend({
      * node and record.
      *
      * @param {Object} node
-     * @param {Object} record
+     * @param {string} recordID id of the local resource
      * @param {jQuery|AbstractField} element
      */
-    _unregisterModifiersElement: function (node, record, element) {
+    _unregisterModifiersElement: function (node, recordID, element) {
         var modifiersData = this._getModifiersData(node);
         if (modifiersData) {
-            var elements = modifiersData.elementsByRecord[record.id];
+            var elements = modifiersData.elementsByRecord[recordID];
             var index = _.findIndex(elements, function (oldElement) {
                 return oldElement.widget === element
                     || oldElement.$el[0] === element[0];

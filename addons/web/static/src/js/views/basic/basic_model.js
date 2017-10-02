@@ -769,7 +769,7 @@ var BasicModel = AbstractModel.extend({
     removeLine: function (elementID) {
         var record = this.localData[elementID];
         var parent = this.localData[record.parentID];
-        if (parent.parentID) {
+        if (parent.static) {
             // x2Many case: the new record has been stored in _changes, as a
             // command so we remove the command(s) related to that record
             parent._changes = _.filter(parent._changes, function (change) {
@@ -778,6 +778,7 @@ var BasicModel = AbstractModel.extend({
         } else {
             // main list view case: the new record is in data
             parent.data = _.without(parent.data, elementID);
+            parent.count--;
         }
     },
     /**
@@ -945,6 +946,17 @@ var BasicModel = AbstractModel.extend({
         var record = this.localData[recordID];
         record.fields = _.defaults(record.fields, viewInfo.fields);
         record.fieldsInfo = _.defaults(record.fieldsInfo, viewInfo.fieldsInfo);
+    },
+    /**
+     * Manually sets a resource as dirty. This is used to notify that a field
+     * has been modified, but with an invalid value. In that case, the value is
+     * not sent to the basic model, but the record should still be flagged as
+     * dirty so that it isn't discarded without any warning.
+     *
+     * @param {string} id a resource id
+     */
+    setDirty: function (id) {
+        this.localData[id]._isDirty = true;
     },
     /**
      * For list resources, this changes the orderedBy key.
@@ -1234,7 +1246,7 @@ var BasicModel = AbstractModel.extend({
                 record._rawChanges[name] = val;
                 return;
             }
-            var oldValue = record._changes[name] || record.data[name];
+            var oldValue = name in record._changes ? record._changes[name] : record.data[name];
             var id;
             if (field.type === 'many2one') {
                 id = false;
@@ -1307,13 +1319,25 @@ var BasicModel = AbstractModel.extend({
                 record._changes[name] = list.id;
                 var shouldLoad = false;
                 list._changes = list._changes || [];
+
+                // save it in case of a [5] which will remove the _changes
+                var oldChanges = list._changes;
                 _.each(val, function (command) {
-                    var rec;
+                    var rec, recID;
                     if (command[0] === 0 || command[0] === 1) {
                         // CREATE or UPDATE
+                        if (command[0] === 0 && command[1]) {
+                            // updating an existing (virtual) record
+                            var previousChange = _.find(oldChanges, function (operation) {
+                                var child = self.localData[operation.id];
+                                return child && (child.res_id === command[1]);
+                            });
+                            recID = previousChange && previousChange.id;
+                            rec = self.localData[recID];
+                        }
                         if (command[0] === 1 && command[1]) {
                             // updating an existing record
-                            var recID = _.find(list.data, function (childID) {
+                            recID = _.find(list.data, function (childID) {
                                 var child = self.localData[childID];
                                 return child.res_id === command[1];
                             });
@@ -1327,7 +1351,7 @@ var BasicModel = AbstractModel.extend({
                                 modelName: list.model,
                                 parentID: list.id,
                                 viewType: list.viewType,
-                            ref: command[1],
+                                ref: command[1],
                             };
                             if (command[0] === 1) {
                                 params.res_id = command[1];
@@ -1632,24 +1656,25 @@ var BasicModel = AbstractModel.extend({
         var hasOnchange = false;
         var specs = {};
         var fieldsInfo = record.fieldsInfo[viewType || record.viewType];
+        generateSpecs(fieldsInfo, record.fields);
 
-        _.each(Object.keys(fieldsInfo), function (name) {
-            var field = record.fields[name];
-            var fieldInfo = fieldsInfo[name];
-            specs[name] = (field.onChange) || "";
-            if (field.onChange) {
-                hasOnchange = true;
-            }
-            _.each(fieldInfo.views, function (view) {
-                _.each(view.fieldsInfo[view.type], function (field, subname) {
-                    var onChange = view.fields[subname].onChange;
-                    specs[name + '.' + subname] = onChange || "";
-                    if (onChange) {
-                        hasOnchange = true;
-                    }
+        // recursively generates the onchange specs for fields in fieldsInfo,
+        // and their subviews
+        function generateSpecs (fieldsInfo, fields, prefix) {
+            prefix = prefix || '';
+            _.each(Object.keys(fieldsInfo), function (name) {
+                var field = fields[name];
+                var fieldInfo = fieldsInfo[name];
+                var key = prefix + name;
+                specs[key] = (field.onChange) || "";
+                if (field.onChange) {
+                    hasOnchange = true;
+                }
+                _.each(fieldInfo.views, function (view) {
+                    generateSpecs(view.fieldsInfo[view.type], view.fields, key + '.');
                 });
             });
-        });
+        }
         return hasOnchange ? specs : false;
     },
     /**
@@ -1674,6 +1699,9 @@ var BasicModel = AbstractModel.extend({
         }
         if ('invisible' in modifiers) {
             result.invisible = evalModifier(modifiers.invisible);
+        }
+        if ('column_invisible' in modifiers) {
+            result.column_invisible = evalModifier(modifiers.column_invisible);
         }
         if ('readonly' in modifiers) {
             result.readonly = evalModifier(modifiers.readonly);
@@ -2833,7 +2861,7 @@ var BasicModel = AbstractModel.extend({
     _isFieldProtected: function (record, fieldName, viewType) {
         var fieldInfo = record.fieldsInfo[viewType || record.viewType][fieldName];
         if (fieldInfo) {
-            var rawModifiers = JSON.parse(fieldInfo.modifiers || "{}");
+            var rawModifiers = fieldInfo.modifiers || {};
             var modifiers = this._evalModifiers(record, rawModifiers);
             return modifiers.readonly && !fieldInfo.force_save;
         } else {
@@ -2885,7 +2913,7 @@ var BasicModel = AbstractModel.extend({
             _.each(element.getFieldNames(), function (fieldName) {
                 var field = element.fields[fieldName];
                 var fieldInfo = element.fieldsInfo[element.viewType][fieldName];
-                var rawModifiers = JSON.parse(fieldInfo.modifiers || "{}");
+                var rawModifiers = fieldInfo.modifiers || {};
                 var modifiers = self._evalModifiers(record, rawModifiers);
                 if (modifiers.required && !self._isFieldSet(recordData[fieldName], field.type)) {
                     isValid = false;
@@ -3165,8 +3193,18 @@ var BasicModel = AbstractModel.extend({
                             }
                             if (value[0] === 6) {
                                 // REPLACE_WITH
-                                x2manyList.res_ids = value[2];
-                                x2manyList.count = x2manyList.res_ids.length;
+                                _.each(value[2], function (res_id) {
+                                    r = self._makeDataPoint({
+                                        modelName: x2manyList.model,
+                                        context: x2manyList.context,
+                                        fieldsInfo: fieldsInfo,
+                                        fields: fields,
+                                        parentID: x2manyList.id,
+                                        res_id: res_id,
+                                        viewType: viewType,
+                                    });
+                                    x2manyList._changes.push({operation: 'ADD', id: r.id});
+                                });
                                 var def = self._readUngroupedList(x2manyList).then(function () {
                                     return $.when(
                                         self._fetchX2ManysBatched(x2manyList),

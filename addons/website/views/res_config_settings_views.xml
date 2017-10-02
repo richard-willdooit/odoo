@@ -5,7 +5,7 @@
         <record id="res_config_settings_view_form" model="ir.ui.view">
             <field name="name">res.config.settings.view.form.inherit.website</field>
             <field name="model">res.config.settings</field>
-            <field name="priority" eval="4"/>
+            <field name="priority" eval="20"/>
             <field name="inherit_id" ref="base.res_config_settings_view_form"/>
             <field name="arch" type="xml">
                 <xpath expr="//div[hasclass('settings')]" position="inside">
@@ -26,7 +26,7 @@
                                             </div>
                                             <div class="row">
                                                 <label class="col-md-3 o_light_label" for="favicon" />
-                                                <field name="favicon" widget="image"/>
+                                                <field name="favicon" widget="image" class="pull-left oe_avatar"/>
                                             </div>
                                         </div>
                                     </div>
@@ -69,7 +69,7 @@
                                             </div>
                                         </div>
                                         <div attrs="{'invisible': [('has_google_analytics', '=', False)]}">
-                                            <a href="https://www.odoo.com/documentation/user/online/website/optimize/google_analytics_dashboard.html"
+                                            <a href="https://www.odoo.com/documentation/user/11.0/website/optimize/google_analytics.html"
                                                     class="oe_link fa fa-arrow-right" target="_blank">
                                                 How to get my Tracking ID
                                             </a>
@@ -146,7 +146,7 @@
                                             Let your customers log in to see their documents
                                         </div>
                                         <div class="mt8">
-                                            <field name="auth_signup_uninvited" widget="radio" required="True"/>
+                                            <field name="auth_signup_uninvited" class="o_light_label" widget="radio" required="True"/>
                                         </div>
                                         <div class="content-group">
                                             <div class="mt16">
@@ -202,5 +202,19 @@
             action="action_website_configuration"
             parent="menu_website_global_configuration"
             groups="base.group_system"/>
+
+        <menuitem name="Pages"
+            id="menu_website_pages_list"
+            action="action_website_pages_list"
+            parent="menu_website_global_configuration"
+            sequence="20"
+            groups="base.group_no_one"/>
+
+        <menuitem name="Redirects"
+            id="menu_website_redirect_list"
+            action="action_website_redirect_list"
+            parent="menu_website_global_configuration"
+            sequence="30"
+            groups="base.group_no_one"/>
 
 </odoo>

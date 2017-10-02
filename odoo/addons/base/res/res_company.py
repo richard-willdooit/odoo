@@ -246,13 +246,16 @@ class Company(models.Model):
         return self.env['res.config.settings'].open_company()
 
     @api.multi
-    def set_report_template(self):
-        self.ensure_one()
-        if self.env.context.get('report_template', False):
-            self.external_report_layout = self.env.context['report_template']
-        if self.env.context.get('default_report_name'):
-            document = self.env.get(self.env.context['active_model']).browse(self.env.context['active_id'])
-            report_name = self.env.context['default_report_name']
-            report_action = self.env['ir.actions.report'].search([('report_name', '=', report_name)], limit=1)
-            return report_action.report_action(document, config=False)
-        return False
+    def write_company_and_print_report(self, values):
+        res = self.write(values)
+
+        report_name = values.get('default_report_name')
+        active_ids = values.get('active_ids')
+        active_model = values.get('active_model')
+        if report_name and active_ids and active_model:
+            docids = self.env[active_model].browse(active_ids)
+            return (self.env['ir.actions.report'].search([('report_name', '=', report_name)], limit=1)
+                        .with_context(values)
+                        .report_action(docids))
+        else:
+            return res

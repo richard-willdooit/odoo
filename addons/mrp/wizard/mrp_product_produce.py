@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
+from collections import Counter
 from datetime import datetime
 
 from odoo import api, fields, models, _
 from odoo.addons import decimal_precision as dp
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 from odoo.tools import float_compare, float_round
 
 class MrpProductProduce(models.TransientModel):
@@ -36,11 +37,13 @@ class MrpProductProduce(models.TransientModel):
                 res['product_qty'] = todo_quantity
             if 'produce_line_ids' in fields:
                 lines = []
-                for move in production.move_raw_ids.filtered(lambda x: (x.product_id.tracking != 'none') and x.state not in ('done', 'cancel')):
+                for move in production.move_raw_ids.filtered(lambda x: (x.product_id.tracking != 'none') and x.state not in ('done', 'cancel') and x.bom_line_id):
                     qty_to_consume = todo_quantity / move.bom_line_id.bom_id.product_qty * move.bom_line_id.product_qty
                     for move_line in move.move_line_ids:
-                        if float_compare(qty_to_consume, 0.0, precision_rounding=move.product_uom.rounding) < 0:
+                        if float_compare(qty_to_consume, 0.0, precision_rounding=move.product_uom.rounding) <= 0:
                             break
+                        if float_compare(move_line.product_uom_qty, move_line.qty_done, precision_rounding=move.product_uom.rounding) <= 0:
+                            continue
                         to_consume_in_line = min(qty_to_consume, move_line.product_uom_qty)
                         lines.append({
                             'move_id': move.id,
@@ -91,7 +94,7 @@ class MrpProductProduce(models.TransientModel):
             raise UserError(_('You should at least produce some quantity'))
         for move in self.production_id.move_raw_ids:
             # TODO currently not possible to guess if the user updated quantity by hand or automatically by the produce wizard.
-            if move.product_id.tracking == 'none' and move.quantity_done < move.product_uom_qty and move.state not in ('done', 'cancel') and move.unit_factor:
+            if move.product_id.tracking == 'none' and move.state not in ('done', 'cancel') and move.unit_factor:
                 rounding = move.product_uom.rounding
                 move.quantity_done += float_round(quantity * move.unit_factor, precision_rounding=rounding)
         for move in self.production_id.move_finished_ids:
@@ -135,7 +138,28 @@ class MrpProductProduce(models.TransientModel):
                 self.env['stock.move.line'].create(vals)
 
         for pl in self.produce_line_ids:
-            if pl.qty_done and pl.lot_id:
+            if pl.qty_done:
+                if not pl.lot_id:
+                    raise UserError(_('Please enter a lot or serial number for %s !' % pl.product_id.name))
+                if not pl.move_id:
+                    # Find move_id that would match
+                    move_id = self.production_id.move_raw_ids.filtered(lambda x: x.product_id == pl.product_id and x.state not in ('done', 'cancel'))
+                    if move_id:
+                        pl.move_id = move_id
+                    else:
+                        # create a move and put it in there
+                        order = self.production_id
+                        pl.move_id = self.env['stock.move'].create({
+                                        'name': order.name,
+                                        'product_id': pl.product_id.id,
+                                        'product_uom': pl.product_uom_id.id,
+                                        'location_id': order.location_src_id.id,
+                                        'location_dest_id': self.product_id.property_stock_production.id,
+                                        'raw_material_production_id': order.id,
+                                        'origin': order.name,
+                                        'group_id': order.procurement_group_id.id,
+                                        'state': 'confirmed',
+                                    })
                 ml = pl.move_id.move_line_ids.filtered(lambda ml: ml.lot_id == pl.lot_id and not ml.lot_produced_id)
                 if ml:
                     if (ml.qty_done + pl.qty_done) >= ml.product_uom_qty:
@@ -161,6 +185,7 @@ class MrpProductProduce(models.TransientModel):
                     })
         return True
 
+
 class MrpProductProduceLine(models.TransientModel):
     _name = "mrp.product.produce.line"
     _description = "Record Production Line"
@@ -175,5 +200,28 @@ class MrpProductProduceLine(models.TransientModel):
 
     @api.onchange('lot_id')
     def _onchange_lot_id(self):
+        res = {}
         if self.product_id.tracking == 'serial':
             self.qty_done = 1
+        return res
+
+    @api.constrains('lot_id')
+    def _check_lot_id(self):
+        for ml in self:
+            if ml.product_id.tracking == 'serial':
+                produce_lines_to_check = ml.product_produce_id.produce_line_ids.filtered(lambda l: l.product_id == ml.product_id and l.lot_id)
+                message = produce_lines_to_check._check_for_duplicated_serial_numbers()
+                if message:
+                    raise ValidationError(message)
+
+    def _check_for_duplicated_serial_numbers(self):
+        if self.mapped('lot_id'):
+            lots_map = [(ml.product_id.id, ml.lot_id.name) for ml in self]
+            recorded_serials_counter = Counter(lots_map)
+            for (product_id, lot_id), occurrences in recorded_serials_counter.items():
+                if occurrences > 1 and lot_id is not False:
+                    return _('You cannot consume the same serial number twice. Please correct the serial numbers encoded.')
+
+    @api.onchange('product_id')
+    def _onchange_product_id(self):
+        self.product_uom_id = self.product_id.uom_id.id

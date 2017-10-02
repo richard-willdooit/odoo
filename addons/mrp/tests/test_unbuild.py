@@ -10,46 +10,6 @@ class TestUnbuild(TestMrpCommon):
         super(TestUnbuild, self).setUp()
         self.stock_location = self.env.ref('stock.stock_location_stock')
 
-    def generate_mo(self, tracking_final='none', tracking_base_1='none', tracking_base_2='none'):
-        """ This function generate a manufacturing order with one final product
-        and two consumed product. Arguments allows to choose the tracking for each
-        different products.
-        It returns the MO, used bom, the tree products
-        """
-        product_to_build = self.env['product.product'].create({
-            'name': 'Young Tom',
-            'type': 'product',
-            'tracking': tracking_final,
-        })
-        product_to_use_1 = self.env['product.product'].create({
-            'name': 'Botox',
-            'type': 'product',
-            'tracking': tracking_base_1,
-        })
-        product_to_use_2 = self.env['product.product'].create({
-            'name': 'Old Tom',
-            'type': 'product',
-            'tracking': tracking_base_2,
-        })
-        bom_1 = self.env['mrp.bom'].create({
-            'product_id': product_to_build.id,
-            'product_tmpl_id': product_to_build.product_tmpl_id.id,
-            'product_uom_id': self.uom_unit.id,
-            'product_qty': 1.0,
-            'type': 'normal',
-            'bom_line_ids': [
-                (0, 0, {'product_id': product_to_use_2.id, 'product_qty': 1}),
-                (0, 0, {'product_id': product_to_use_1.id, 'product_qty': 4})
-            ]})
-        mo = self.env['mrp.production'].create({
-            'name': 'MO 1',
-            'product_id': product_to_build.id,
-            'product_uom_id': product_to_build.uom_id.id,
-            'product_qty': 5.0,
-            'bom_id': bom_1.id,
-        })
-        return mo, bom_1, product_to_build, product_to_use_1, product_to_use_2
-
     def test_unbuild_standart(self):
         """ This test creates a MO and then creates 3 unbuild
         orders for the final product. None of the products for this
@@ -216,7 +176,8 @@ class TestUnbuild(TestMrpCommon):
         self.env['stock.quant']._update_available_quantity(p2, self.stock_location, 5)
         mo.action_assign()
         for ml in mo.move_raw_ids.mapped('move_line_ids'):
-            ml.qty_done = ml.product_qty
+            if ml.product_id.tracking != 'none':
+                ml.qty_done = ml.product_qty
             if ml.product_id.tracking != 'none':
                 self.assertEqual(ml.lot_id, lot, 'Wrong reserved lot.')
 
@@ -406,7 +367,7 @@ class TestUnbuild(TestMrpCommon):
         self.env['stock.quant']._update_available_quantity(p2, self.stock_location, 3, lot_id=lot_2)
         self.env['stock.quant']._update_available_quantity(p2, self.stock_location, 2, lot_id=lot_3)
         mo.action_assign()
-        for ml in mo.move_raw_ids.mapped('move_line_ids'):
+        for ml in mo.move_raw_ids.mapped('move_line_ids').filtered(lambda m: m.product_id.tracking != 'none'):
             ml.qty_done = ml.product_qty
 
         produce_wizard = self.env['mrp.product.produce'].with_context({

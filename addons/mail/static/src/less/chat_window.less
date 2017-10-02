@@ -3,6 +3,7 @@
 @o-mail-chatter-gap: 10px; // has to be defined here as this file is both in
                            // backend and other assets (livechat)
 @o-chat-header-height: 46px;
+@o-chat-window-zindex: 1101; // blockUI's z-index is 1100 > @zindex-modal
 
 .o_chat_window {
     .o-flex-display();
@@ -15,7 +16,7 @@
     font-size: 12px;
     background-color: @o-chat-window-bg;
     border-radius: 6px 6px 0 0;
-    z-index: 3;
+    z-index: @o-chat-window-zindex;
     box-shadow: -5px -5px 10px fade(black, 18%);
 
     @media (max-width: @screen-xs-max) {
@@ -37,7 +38,7 @@
         color: white;
         padding: @o-mail-chatter-gap*0.5 @o-mail-chatter-gap;
         border-radius: 3px 3px 0 0;
-        border-bottom: 1px solid @odoo-color-silver-dark; // cannot use gray-lighter-dark as this file is also frontend
+        border-bottom: 1px solid @gray-lighter-dark;
         background-color: @odoo-brand-primary;
         padding: 8px;
 
@@ -143,9 +144,6 @@
     }
 }
 
-.o_ui_blocked .o_chat_window {
-    z-index: 1101; // blockUI's z-index is 1100
-}
 .o_no_chat_window .o_chat_window {
     display: none;
 }

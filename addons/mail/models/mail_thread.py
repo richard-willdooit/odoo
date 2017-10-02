@@ -1900,8 +1900,8 @@ class MailThread(models.AbstractModel):
             if not subtype_rec.internal:
                 # done with SUPERUSER_ID, because on some models users can post only with read access, not necessarily write access
                 self.sudo().write({'message_last_post': fields.Datetime.now()})
-        if new_message.author_id and model and self.ids and message_type != 'notification' and not self._context.get('mail_create_nosubscribe'):
-            self.message_subscribe([new_message.author_id.id], force=False)
+        if author_id and model and self.ids and message_type != 'notification' and not self._context.get('mail_create_nosubscribe'):
+            self.message_subscribe([author_id], force=False)
 
         self._message_post_after_hook(new_message)
 
@@ -2117,11 +2117,10 @@ class MailThread(models.AbstractModel):
         user_field_lst = self._message_get_auto_subscribe_fields(updated_fields)
 
         # fetch header subtypes
-        subtypes = self.env['mail.message.subtype'].search(['|', ('res_model', '=', False), ('parent_id.res_model', '=', self._name)])
+        subtypes, relation_fields = self.env['mail.message.subtype'].auto_subscribe_subtypes(self._name)
 
         # if no change in tracked field or no change in tracked relational field: quit
-        relation_fields = set([subtype.relation_field for subtype in subtypes if subtype.relation_field is not False])
-        if not any(relation in updated_fields for relation in relation_fields) and not user_field_lst:
+        if not any(relation in relation_fields for relation in updated_fields) and not user_field_lst:
             return True
 
         # find followers of headers, update structure for new followers
