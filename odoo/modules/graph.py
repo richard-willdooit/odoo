@@ -28,6 +28,10 @@ def _ignored_modules(cr: BaseCursor) -> list[str]:
     return result
 
 
+def check_package_delayed(info):
+    return int(info.get('load_priority', 0)) > 0
+
+
 class Graph(dict[str, 'Node']):
     """ Modules dependency graph.
 
@@ -37,8 +41,17 @@ class Graph(dict[str, 'Node']):
 
     def add_node(self, name: str, info: dict) -> Node:
         max_depth, father = 0, None
+
+        package_delayed = check_package_delayed(info)
+
         for d in info['depends']:
             n = self.get(d) or Node(d, self, None)  # lazy creation, do not use default value for get()
+
+            if package_delayed:
+                deepest_nodes = n.deepest_nodes()
+                if deepest_nodes:
+                    n = deepest_nodes[-1]
+
             if n.depth >= max_depth:
                 father = n
                 max_depth = n.depth
@@ -85,12 +98,30 @@ class Graph(dict[str, 'Node']):
         current: set[str] = {p for p, _info in packages}
         later: set[str] = set()
 
+        delayed_packages = []
+        do_delayed_package = False
+
         while packages and current > later:
             package, info = packages[0]
             deps = info['depends']
 
+            # Have we looped through all without adding anything?
+            if delayed_packages and package == delayed_packages[0][0]:
+                delayed_packages.sort(key=lambda p: int(p[1]['load_priority']))
+                do_delayed_package = delayed_packages[0][0]
+                delayed_packages = []
+
             # if all dependencies of 'package' are already in the graph, add 'package' in the graph
             if all(dep in self for dep in deps):
+                if check_package_delayed(info) and package != do_delayed_package:
+                    delayed_packages.append((package, info))
+                    packages.append((package, info))
+                    packages.pop(0)
+                    continue
+
+                delayed_packages = []
+                do_delayed_package = False
+
                 if not package in current:
                     packages.pop(0)
                     continue
@@ -171,6 +202,15 @@ class Node:
                 setattr(node, attr, True)
         self.children.sort(key=lambda x: x.name)
         return node
+
+    def deepest_nodes(self):
+        next_level = [self]
+        while next_level:
+            last_level = next_level
+            next_level = []
+            for node in last_level:
+                next_level.extend(node.children)
+        return last_level
 
     def __setattr__(self, name, value):
         super().__setattr__(name, value)
