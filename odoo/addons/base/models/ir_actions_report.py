@@ -21,7 +21,6 @@ import json
 
 from lxml import etree
 from contextlib import closing
-from distutils.version import LooseVersion
 from PyPDF2 import PdfFileWriter, PdfFileReader, utils
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -55,6 +54,17 @@ def _get_wkhtmltopdf_bin():
     return find_in_path('wkhtmltopdf')
 
 
+def _wkhtmltopdf_version_tuple(version):
+    """Order a wkhtmltopdf version without distutils.
+
+    distutils' LooseVersion is deprecated and warns on every start under a
+    newer setuptools, which is noise in the build logs. The version reaching
+    here has already been reduced to digits and dots by the regex below, so a
+    tuple of ints orders it the same way.
+    """
+    return tuple(int(part) for part in version.split('.') if part.isdigit())
+
+
 # Check the presence of Wkhtmltopdf and return its version at Odoo start-up
 wkhtmltopdf_state = 'install'
 wkhtmltopdf_dpi_zoom_ratio = False
@@ -70,12 +80,12 @@ else:
     match = re.search(b'([0-9.]+)', out)
     if match:
         version = match.group(0).decode('ascii')
-        if LooseVersion(version) < LooseVersion('0.12.0'):
+        if _wkhtmltopdf_version_tuple(version) < (0, 12, 0):
             _logger.info('Upgrade Wkhtmltopdf to (at least) 0.12.0')
             wkhtmltopdf_state = 'upgrade'
         else:
             wkhtmltopdf_state = 'ok'
-        if LooseVersion(version) >= LooseVersion('0.12.2'):
+        if _wkhtmltopdf_version_tuple(version) >= (0, 12, 2):
             wkhtmltopdf_dpi_zoom_ratio = True
 
         if config['workers'] == 1:
